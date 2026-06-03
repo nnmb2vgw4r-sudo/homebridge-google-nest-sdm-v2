@@ -2,6 +2,7 @@ import * as google from "googleapis";
 import * as Events from './Events';
 import {Logger} from "homebridge";
 import _ from "lodash";
+import {summarizeError} from "../util";
 
 export abstract class Device {
     protected smartdevicemanagement: google.smartdevicemanagement_v1.Smartdevicemanagement;
@@ -43,7 +44,7 @@ export abstract class Device {
             this.device = response.data;
             this.lastRefresh = Date.now();
         } catch (error: any) {
-            this.log.error('Could not execute device GET request: ', JSON.stringify(error), this.getDisplayName());
+            this.log.error('Could not execute device GET request: ' + summarizeError(error), this.getDisplayName());
         }
     }
 
@@ -74,7 +75,7 @@ export abstract class Device {
             this.log.debug(`Execution of command ${name} returned ${JSON.stringify(response.data.results)}`, this.getDisplayName());
             return <U>response.data.results;
         } catch (error: any) {
-            this.log.error('Could not execute device command: ', JSON.stringify(error), this.getDisplayName());
+            this.log.error('Could not execute device command: ' + summarizeError(error), this.getDisplayName());
         }
 
         return undefined;

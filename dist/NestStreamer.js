@@ -49,6 +49,7 @@ class RtspNestStreamer extends NestStreamer {
 exports.RtspNestStreamer = RtspNestStreamer;
 class WebRtcNestStreamer extends NestStreamer {
     async initialize() {
+        var _a, _b;
         this.udp = (0, dgram_1.createSocket)("udp4");
         this.pc = new werift_1.RTCPeerConnection({
             bundlePolicy: "max-bundle",
@@ -104,6 +105,20 @@ class WebRtcNestStreamer extends NestStreamer {
         let offer = await this.pc.createOffer();
         await this.pc.setLocalDescription(offer);
         const streamInfo = await this.camera.generateStream(offer.sdp);
+        if (!streamInfo || !streamInfo.mediaSessionId) {
+            // generateStream() returns undefined when the SDM command failed — most
+            // commonly an HTTP 429 (RESOURCE_EXHAUSTED). Fail with a clear message
+            // instead of throwing a TypeError on `streamInfo.mediaSessionId`.
+            try {
+                await ((_a = this.pc) === null || _a === void 0 ? void 0 : _a.close());
+            }
+            catch (e) { /* ignore */ }
+            try {
+                await ((_b = this.udp) === null || _b === void 0 ? void 0 : _b.close());
+            }
+            catch (e) { /* ignore */ }
+            throw new Error('Nest SDM returned no media session (likely rate-limited / HTTP 429). Aborting stream start.');
+        }
         this.token = streamInfo.mediaSessionId;
         await this.pc.setRemoteDescription({
             type: 'answer',

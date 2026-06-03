@@ -1,4 +1,23 @@
 "use strict";
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    Object.defineProperty(o, k2, { enumerable: true, get: function() { return m[k]; } });
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || function (mod) {
+    if (mod && mod.__esModule) return mod;
+    var result = {};
+    if (mod != null) for (var k in mod) if (k !== "default" && Object.prototype.hasOwnProperty.call(mod, k)) __createBinding(result, mod, k);
+    __setModuleDefault(result, mod);
+    return result;
+};
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.Platform = void 0;
 const Settings_1 = require("./Settings");
@@ -12,6 +31,7 @@ const DoorbellAccessory_1 = require("./DoorbellAccessory");
 const EcoMode = require("./EcoMode");
 const FanAccessory_1 = require("./FanAccessory");
 const UnknownDevice_1 = require("./sdm/UnknownDevice");
+const SnapshotRefresher = __importStar(require("./SnapshotRefresher"));
 let IEcoMode;
 /**
  * HomebridgePlatform
@@ -38,7 +58,19 @@ class Platform {
         // in order to ensure they weren't added to homebridge already. This event can also be used
         // to start discovery of new accessories.
         this.api.on('didFinishLaunching', () => {
+            var _a, _b;
             log.debug('Executed didFinishLaunching callback');
+            // Configure the snapshot refresher once, rooted at the Homebridge storage path
+            // (NOT os.homedir(), which is wrong under non-login service accounts).
+            SnapshotRefresher.configure({
+                storagePath: this.api.user.storagePath(),
+                ffmpegPath: this.config.ffmpegPath,
+                enabled: this.config.snapshotRefresh !== false,
+                appOpenEnabled: this.config.snapshotRefreshOnAppOpen !== false,
+                spacingMs: ((_a = this.config.snapshotRefreshSpacing) !== null && _a !== void 0 ? _a : 30) * 1000,
+                ttlMs: ((_b = this.config.snapshotRefreshTtl) !== null && _b !== void 0 ? _b : 15) * 60000,
+                log: this.log,
+            });
             // run the method to discover / register your devices as accessories
             this.discoverDevices();
         });

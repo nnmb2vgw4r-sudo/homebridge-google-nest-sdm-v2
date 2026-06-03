@@ -29,6 +29,8 @@ import {getStreamer, NestStream, NestStreamer} from "./NestStreamer";
 import {Platform} from "./Platform";
 import HksvStreamer from "./HksvStreamer";
 import pickPort, { pickPortOptions } from 'pick-port';
+import * as SnapshotRefresher from "./SnapshotRefresher";
+import {resolveFfmpegPath} from "./util";
 
 type SessionInfo = {
   address: string; // address of the HAP controller
@@ -353,6 +355,15 @@ export abstract class StreamingDelegate<T extends CameraController> implements C
       ffmpegArgs += ' -loglevel level+verbose';
     }
 
+    // Snapshot cache: while a live view is up, also write a throttled JPEG so the Home
+    // app tile shows the last-viewed frame. Passed as discrete args (not in the
+    // whitespace-split arg string) so a cache path containing spaces survives.
+    const snapshotArgs: string[] = SnapshotRefresher.isConfigured()
+        ? ['-map', '0:v', '-r', '1', '-vf', 'scale=640:-2', '-q:v', '5', '-update', '1', '-f', 'image2', '-y',
+           SnapshotRefresher.snapshotPathFor(this.camera.getName())]
+        : [];
+    const ffmpegPath = resolveFfmpegPath(this.config.ffmpegPath);
+
     const activeSession: ActiveSession = { streamer: nestStreamer };
 
     try {
@@ -377,7 +388,7 @@ export abstract class StreamingDelegate<T extends CameraController> implements C
       return;
     }
 
-    activeSession.mainProcess = new FfmpegProcess(this.camera.getDisplayName(), request.sessionID, ffmpegArgs, nestStream.stdin, this.log, this.platform.debugMode, this, callback);
+    activeSession.mainProcess = new FfmpegProcess(this.camera.getDisplayName(), request.sessionID, ffmpegArgs, nestStream.stdin, this.log, this.platform.debugMode, this, callback, ffmpegPath, snapshotArgs);
 
     this.ongoingSessions[request.sessionID] = activeSession;
     delete this.pendingSessions[request.sessionID];
@@ -540,7 +551,8 @@ export abstract class StreamingDelegate<T extends CameraController> implements C
         nestStream,
         audioArgs,
         videoArgs,
-        this.platform.debugMode
+        this.platform.debugMode,
+        resolveFfmpegPath(this.config.ffmpegPath)
     );
 
     this.recordingSessionInfo = {
@@ -581,6 +593,10 @@ export abstract class StreamingDelegate<T extends CameraController> implements C
       }
     } catch (error: any) {
       this.log.error("Encountered unexpected error on generator " + error.stack);
+    } finally {
+      // Guarantee the HKSV ffmpeg + SDM stream are torn down when the generator ends,
+      // even if HomeKit never calls closeRecordingStream (addresses orphaned ffmpeg).
+      this.closeRecordingStream(streamId, undefined);
     }
   }
 

@@ -1,151 +1,143 @@
-[![verified-by-homebridge](https://badgen.net/badge/homebridge/verified/purple)](https://github.com/homebridge/homebridge/wiki/Verified-Plugins)
-[![Donate](https://img.shields.io/badge/Donate-PayPal-green.svg)](https://www.paypal.com/donate/?business=EVN8JACZRMPTJ&no_recurring=1&currency_code=CAD)
+# homebridge-google-nest-sdm-v2
 
-# homebridge-google-nest-sdm
+A Homebridge plugin for Google Nest **cameras, doorbells, displays, and thermostats** via the documented [Google Smart Device Management (SDM) API](https://developers.google.com/nest/device-access). Supports HomeKit Secure Video.
 
-A Homebridge plugin for Google Nest devices that uses the [Google Smart Device Management API](https://developers.google.com/nest/device-access). Supports Cameras, Doorbells, Displays, and Thermostats.  Supports HomeKit Secure Video (please read the section on HKSV below).
+> **Maintained fork.** This is a community-maintained continuation of the excellent [`homebridge-google-nest-sdm`](https://github.com/potmat/homebridge-google-nest-sdm) by **potmat** (originally based on a Homebridge template © 2020 Andreas Bauer), which is no longer actively updated. All credit for the original work goes to them; this fork is offered **best-effort** under the same ISC license. It is not affiliated with or endorsed by Google.
 
-**Please read the [FAQ](https://github.com/potmat/homebridge-google-nest-sdm#faq) before creating an issue.** If you are having trouble with the setup process you can try reaching out to others in [Discussions](https://github.com/potmat/homebridge-google-nest-sdm/discussions), on [Discord](https://discord.gg/kqNCe2D), or [Reddit](https://www.reddit.com/r/homebridge/), some people there may be able to help.
+## What's new in v2
 
+- **Refreshing camera snapshots** — Home-app tiles now show a recent frame instead of the generic Nest/Google placeholder. Stills are grabbed on motion and (optionally) when you open the Home app, through a single **rate-limited, serialized queue** so it stays clear of the SDM 429 limit. Configurable; can be turned off. *(addresses [#45](https://github.com/potmat/homebridge-google-nest-sdm/issues/45))*
+- **Configurable ffmpeg / hardware transcoding** — a new `ffmpegPath` option lets you point at a build with the hardware encoder you want (`h264_qsv`, `h264_videotoolbox`, `h264_vaapi`, `h264_nvenc`, …) instead of being locked to the bundled binary.
+- **Security: no more tokens in logs** — SDM command errors no longer dump the full request (which contained your OAuth `Authorization: Bearer …` token) into the Homebridge log. *(addresses the leak seen in [#99](https://github.com/potmat/homebridge-google-nest-sdm/issues/99))*
+- **Graceful rate-limit handling** — an SDM `429 RESOURCE_EXHAUSTED` on stream start now logs a clear message instead of throwing `TypeError: Cannot read properties of undefined (reading 'mediaSessionId')`. *(addresses [#99](https://github.com/potmat/homebridge-google-nest-sdm/issues/99))*
+- **HKSV teardown hardening** — recording streams now force-kill ffmpeg (SIGKILL escalation) and always release the server/socket, reducing orphaned ffmpeg processes / growing memory. *(addresses [#150](https://github.com/potmat/homebridge-google-nest-sdm/issues/150))*
+- **Homebridge v2 support** — declared compatible with Homebridge `^1.6.0 || ^2.0.0`. *(addresses [#200](https://github.com/potmat/homebridge-google-nest-sdm/issues/200))*
+- **Clearer setup docs** — the three "project" identifiers are disambiguated, and the critical Pub/Sub-scope step is front and center (see below).
 
+See [CHANGELOG.md](./CHANGELOG.md).
 
-# Disclaimer
+## Installation
 
-This package is not affiliated with, provided, endorsed, or supported by Google in any way.  It is intended for personal, non-commercial use only.  Please review the [Google Smart Device Management Terms of Service](https://developers.google.com/nest/device-access/tos) to ensure that your usage of this package is not in violation.
+```
+npm install -g --unsafe-perm homebridge-google-nest-sdm-v2
+```
 
-# Installation
+Or install **Google Nest SDM (v2)** from the Homebridge UI plugin search. Don't forget `--unsafe-perm` on the CLI.
 
-``npm install -g --unsafe-perm homebridge-google-nest-sdm``
+> Migrating from the original `homebridge-google-nest-sdm`? Uninstall it first (they register the same platform and can't both run), then install this. Your existing config works as-is — the `"platform"` value stays `"homebridge-google-nest-sdm"`.
 
-Don't forget the ``--unsafe-perm`` part!
+## Setup
 
-# Example Homebridge config:
+You need five values from Google. Follow Google's [Device Access getting-started guide](https://developers.google.com/nest/device-access/get-started), then mind the **Pub/Sub scope** step below.
 
-    {
-        "platform" : "homebridge-google-nest-sdm",
-        "clientId": "...",
-        "clientSecret": "...",
-        "projectId": "...",
-        "refreshToken": "...",
-        "subscriptionId": "...",
-        "gcpProjectId": "<optional>",
-        "vEncoder": "<optional>"
-        "showFan": "<optional>"
-        "fanDuration": "<optional>"
-    }
+### The three "project" identifiers (this trips everyone up)
 
-I recommend you use the plugin config UI to enter these values.
+Google's setup involves **three different things all called a "project."** Mixing them up is the #1 cause of setup failure (typically an `invalid_client` error):
 
-# Where do the config values come from?
+| Config field | What it is | Looks like | Where it comes from |
+|---|---|---|---|
+| `projectId` | **Device Access** Project ID | a UUID, `4f689e03-...` | [Device Access Console](https://developers.google.com/nest/device-access/get-started#create_a_device_access_project) |
+| `gcpProjectId` | **Google Cloud** Project ID | `my-project-334315` | the GCP project where you made the OAuth client + Pub/Sub subscription |
+| (not a config field) | GCP **project number** | `837325688835` | appears only in some error messages — same project as `gcpProjectId` |
 
-Follow the getting started guide here: https://developers.google.com/nest/device-access/get-started  Please mind the "ONE IMPORTANT DIFFERENCE" section below.
+And the OAuth credentials, which are **not** any of the above:
 
-**clientId** and **clientSecret** come from this step: https://developers.google.com/nest/device-access/get-started#set_up_google_cloud_platform.  **clientId** should look something like "780816631155-gbvyo1o7r2pn95qc4ei9d61io4uh48hl.apps.googleusercontent.com". **clientSecret** will be a random string of letters, numbers, and dashes.
+- `clientId` — OAuth client ID, ends in `.apps.googleusercontent.com` ([GCP setup](https://developers.google.com/nest/device-access/get-started#set_up_google_cloud_platform)).
+- `clientSecret` — paired secret, starts with `GOCSPX-`.
 
-**projectId** comes from this step: https://developers.google.com/nest/device-access/get-started#create_a_device_access_project
+### Remaining values
 
-**refreshToken** comes from this step: https://developers.google.com/nest/device-access/authorize#get_an_access_token
+- `refreshToken` — from [authorizing the account](https://developers.google.com/nest/device-access/authorize#get_an_access_token). **Must be generated with the Pub/Sub scope** (see below).
+- `subscriptionId` — from [creating a Pub/Sub pull subscription](https://developers.google.com/nest/device-access/subscribe-to-events#create_a_pull_subscription). Full path form: `projects/<gcp-project-id>/subscriptions/<subscription-id>`.
 
-**subscriptionID** comes from this step: https://developers.google.com/nest/device-access/subscribe-to-events#create_a_pull_subscription. It should look like "projects/your-gcp-project-id/subscriptions/your-subscription-id".
+### ⚠️ THE PUB/SUB SCOPE STEP — don't skip this
 
-**gcpProjectId** is optional. It is the ID of the Google Cloud Platform project you created when getting the **clientId** and **clientSecret**. If you are having trouble subsribing to events try populating this field.
+When you authorize the account, Google's guide tells you to open an authorization URL whose scope is **only** `sdm.service`:
 
-**vEncoder** is optional.  It is the encoder the plugin will use for camera streams. If vEncoder is not specified it will default to "libx264 -preset ultrafast -tune zerolatency". You can use "copy" to not transcode streams at all, this will require almost no CPU, and seems to work fine on most devices, however it's not guaranteed to work in all scenarios. On a Raspberry Pi 4 you can try something like "h264_v4l2m2m".  On other platforms you are free to use the encoder of your choice.  If you don't know what this means you can probably ignore it.
+```
+…&scope=https://www.googleapis.com/auth/sdm.service
+```
 
-**showFan** is optional.  If true, a fan accessory will be added.
+**Do not use that URL.** Use one with the Pub/Sub scope appended, or **device events (motion, doorbell presses, temperature changes) will silently not work**:
 
-**fanDuration** is optional. You only need to use this if **showFan** is set to true. It controls the fan duration (in seconds) when turning on the fan.  Must be between 1 and 43200.  Defaults to 900 if not set.
+```
+https://nestservices.google.com/partnerconnections/PROJECT-ID/auth?redirect_uri=https://www.google.com&access_type=offline&prompt=consent&client_id=OAUTH2-CLIENT-ID&response_type=code&scope=https://www.googleapis.com/auth/sdm.service+https://www.googleapis.com/auth/pubsub
+```
 
-ONE IMPORTANT DIFFERENCE!
+Note the `+https://www.googleapis.com/auth/pubsub` on the end. (Replace `PROJECT-ID` with your Device Access project UUID and `OAUTH2-CLIENT-ID` with your client ID.) If you've already generated a refresh token without it, you must re-do this step to get a new one. The symptom of a missing scope is `Plugin initialization failed, there was a failure with event subscription … insufficient authentication scopes`.
 
-In step two "Authorize an Account" in the "Link your account" section, step 1, you are instructed to "open the following link in a web browser":
+## Example config
 
-https://nestservices.google.com/partnerconnections/project-id/auth?redirect_uri=https://www.google.com&access_type=offline&prompt=consent&client_id=oauth2-client-id&response_type=code&scope=https://www.googleapis.com/auth/sdm.service
+```json
+{
+    "platform": "homebridge-google-nest-sdm",
+    "clientId": "780816631155-xxxx.apps.googleusercontent.com",
+    "clientSecret": "GOCSPX-...",
+    "projectId": "4f689e03-....",
+    "refreshToken": "1//...",
+    "subscriptionId": "projects/my-project-334315/subscriptions/nest-events-sub",
+    "gcpProjectId": "my-project-334315",
+    "vEncoder": "libx264 -preset ultrafast -tune zerolatency",
+    "ffmpegPath": "",
+    "snapshotRefresh": true,
+    "snapshotRefreshOnAppOpen": true,
+    "snapshotRefreshSpacing": 30,
+    "snapshotRefreshTtl": 15
+}
+```
 
-DO NOT USE THIS URL!
+The Homebridge UI config screen is the easiest way to enter these. Only the first five values are required.
 
-You should instead use this URL:
+## Camera snapshots
 
-https://nestservices.google.com/partnerconnections/project-id/auth?redirect_uri=https://www.google.com&access_type=offline&prompt=consent&client_id=oauth2-client-id&response_type=code&scope=https://www.googleapis.com/auth/sdm.service+https://www.googleapis.com/auth/pubsub
+The SDM API has **no on-demand snapshot** for cameras. v2 works around this by caching the **last decoded frame** from streams it opens:
 
-Note the "+https://www.googleapis.com/auth/pubsub" on the end.  This is so you will have access to events.
+- **On motion/person events** a fresh still is grabbed (this is the most useful freshness — a changed tile means something happened).
+- **On app open** (`snapshotRefreshOnAppOpen`) stale tiles are topped up when the Home app requests snapshots.
 
-# HomeKit Secure Video
+All grabs go through one **serialized queue** with a global spacing (`snapshotRefreshSpacing`, default 30s) and a per-camera freshness window (`snapshotRefreshTtl`, default 15 min), so the feature stays well within Google's rate limits. Tradeoff: lower spacing / shorter TTL = fresher tiles but more SDM calls (closer to HTTP 429). Set `snapshotRefresh: false` to disable entirely (tiles fall back to the placeholder logo). Snapshots are cached under your Homebridge storage directory in `nest-sdm-snapshots/`.
 
-This plugin does support HKSV.  Before creating an issue that HKSV isn't working for you, please take note of how HKSV works:
+## Hardware transcoding
 
-1) The SDM API reports motion for a camera.
-2) This plugin reports a motion event to Homebridge.
-3) Homebridge reports that event to your home hub (e.g. HomePod, iPad).
-4) The hub requests a video stream from the camera from Homebridge.
-5) This plugin initiates a stream request to the SDM API, transcodes the video to the format requested by the hub, and sends it to the hub via Homebridge.
-6) The hub analyzes the video for motion.
-7) If the hub sees motion it will log an event in the camera timeline with the clip.
+`vEncoder` selects the ffmpeg video encoder; `ffmpegPath` selects the ffmpeg **binary**. Together they let you offload transcoding to a GPU:
 
-This means that even though there was a motion event, YOU MAY NOT SEE ANYTHING IN THE CAMERA TIMELINE.  This could be because your hub decided that it didn't really see any motion, or, more likely, by the time we reached step six the motion has already ended.
+| Platform | `vEncoder` | Notes |
+|---|---|---|
+| Intel (Quick Sync) | `h264_qsv` | needs an ffmpeg built with QSV + Intel drivers |
+| macOS | `h264_videotoolbox` | |
+| Raspberry Pi 4 | `h264_v4l2m2m` | |
+| Linux + VAAPI | `h264_vaapi` | |
+| NVIDIA | `h264_nvenc` | needs an NVENC-capable ffmpeg |
+| any (no transcode) | `copy` | lowest CPU, but can't adapt to what HomeKit requests; less reliable |
 
-Continuous recording of all camera streams would likely mitigate this effect, but for a variety of reasons this is simply not practicable with the SDM API the way it's written.  To say nothing of the bandwidth and CPU requirements this would entail.
+If `vEncoder` names an encoder your ffmpeg doesn't have, streams will fail ("camera not responding"). Point `ffmpegPath` at a build that includes it. Leave `ffmpegPath` blank to use the bundled `ffmpeg-for-homebridge`.
 
-# Hardware Requirements
+## HomeKit Secure Video
 
-If are are not using the "copy" vEncoder the minimum hardware requirement is something like a Raspberry Pi 4.  If you want multiple people viewing the camera streams at once then you'll probably need even more power. If you are using the "copy" vEncoder you may be able to use a very low power device, but results are not guaranteed.
+HKSV is supported. Note how it works: SDM reports motion → the plugin reports it to your hub → the hub requests a stream → the plugin transcodes it → the hub analyzes it for motion and may log a clip. Because of this round-trip, **a motion event may not always produce a timeline clip** (the motion may be over by the time the hub starts analyzing). HKSV transcoding is CPU-heavy; for many cameras you'll want a capable host.
 
-HomeKit Secure Video will require even more CPU power.  The clips need to be transcoded using the CPU.  Note that transcoding clips for even a single camera with a lot of activity can easily consume 100% of the CPU on a Rasberry Pi-4.  If you want HKSV on for many cameras you'll need a dedicated server of some kind.
+## Troubleshooting
 
-# FAQ
+| Symptom | Likely cause / fix |
+|---|---|
+| `invalid_client` | You mixed up the IDs — `clientId` must be the `…apps.googleusercontent.com` value, not the Device Access UUID. See the table above. |
+| `insufficient authentication scopes` / event subscription failure | Refresh token was generated **without the Pub/Sub scope.** Re-do the authorization with the `+…/auth/pubsub` URL above. Setting `gcpProjectId` can also help. |
+| `SERVICE_DISABLED` / 403 listing devices | The Smart Device Management API isn't enabled on your GCP project. Enable it in *APIs & Services → Library*. |
+| `429` / `RESOURCE_EXHAUSTED` | Google's per-project SDM rate limit, usually from opening many streams at once. v2 handles it gracefully; reduce churn (e.g. don't open many cameras simultaneously) and/or raise `snapshotRefreshSpacing`. You can request a quota increase in the GCP console. |
+| Cameras "not responding" | Check audio/mic is enabled on the camera; ensure ffmpeg exists / your `vEncoder` is supported by your ffmpeg (`ffmpegPath`); disconnect any VPN on the Apple device. |
+| **Docker / Unraid** streams don't work | Running Homebridge in a container breaks ffmpeg input and WebRTC data transfer. **Run Homebridge natively.** |
+| Camera shows as `<null> Camera` | A Google-side glitch; rename it on the HomeKit side after pairing. |
 
-**Q**: HomeKit Secure Video isn't working. Why?
+## FAQ
 
-**A**: Please see the HKSV section above.
+**Why a fork?** The original is dormant (last release Feb 2024) with open issues. This fork carries fixes and a snapshot feature forward. All credit to potmat for the original.
 
-**Q**: I don't see camera snapshots in the Home app, just the Nest/Google logo. Why?
+**Do I still have to pay Google $5 for Device Access?** Yes — that's Google's one-time registration fee, unchanged.
 
-**A**: The SDM API does not have any method for getting a camera snapshot on demand, only when an event occurs. The Nest logo is used as a placeholder for first generation cameras, while the Google logo is used for second generation cameras.  If an event occurred in the last few seconds you will likely see an image.
+**Why use the SDM API at all instead of the unofficial-API Nest plugins?** SDM is the documented, push-event API: lower overhead, no fragile reverse-engineered endpoints or account cookies.
 
-**Q**: My cameras never respond.  Why?
+**Tiles still show the "G" logo.** A tile is a placeholder until the first stream is opened for that camera (then it caches a frame). With `snapshotRefresh` on, it should populate after the first motion/view. Set a shorter `snapshotRefreshTtl` for more frequent updates (at the cost of more SDM calls).
 
-**A**: There are a couple possible reasons for this:
+## Disclaimer
 
-1. Is the microphone/audio disabled on your camera?  If so you will need to enable it.
-2. Do you see something like `[homebridge-google-nest-sdm] Failed to start stream: spawn ffmpeg ENOENT` in your logs? The plugin requires ffmpeg and tries to auto-install it, but if it can't, you'll have to install it manually. For Windows go [here](https://www.ffmpeg.org/download.html). If you have a Mac, especially an Apple Silicon Mac, you should probably use [brew](https://formulae.brew.sh/formula/ffmpeg). On Linux use the package manager of your choice.
-3. Are you running Homebridge inside a Docker container?  Possibly on something like Unraid? This setup seems to cause problems with ffmpeg being able to accept input, and with WebRTC streams being able to transfer data to the container. Try running Homebridge natively on your network instead of in a Docker container.
-4. Is your Apple device connected to a VPN? If so, disconnect.
-5. Wait a while, occasionally the API will refuse all requests for short periods.
-
-**Q**: My cameras only respond some of the time. Why?
-
-**A**: Much like the behaviour some of us have experienced in the Nest app, sometimes the API errors out for unknown reasons.  See also this [issue](https://github.com/potmat/homebridge-google-nest-sdm/issues/4).  I am doing my best to find out why the API fails so often.
-
-**Q**: My cameras stream stops responding after five minutes. Why?
-
-**A**: Streams on the battery powered cameras only last five minutes.  On the wired cameras it's in theory possible to view the stream for more than five minutes, but I haven't figured out how to make that work yet.
-
-**Q**: When the plugin starts I get some message about ```Plugin initialization failed, there was a failure with event subscription```.  Why?
-
-**A**: As the error message tells you, make sure you mind the ["ONE IMPORTANT DIFFERENCE"](https://github.com/potmat/homebridge-google-nest-sdm#where-do-the-config-values-come-from) when setting up your config values.  Try using the **gcpProjectId** config value if you continue to have problems.
-
-**Q**: My camera shows up as ```<null> Camera``` or ``` Camera``` without the room name or anything.  Why?
-
-**A**: This is actually a glitch on the Google side, see [this comment](https://github.com/potmat/homebridge-google-nest-sdm/issues/6#issuecomment-978088908).
-
-**Q**: I'm having problems getting through the getting started guide and getting the config values. Can you help?
-
-**A**: Probably not.  Having a day job and family I don't have much time to help with this.  The Nest plugin for Home Assistant uses much the same process (don't forget the ["ONE IMPORTANT DIFFERENCE"](https://github.com/potmat/homebridge-google-nest-sdm#where-do-the-config-values-come-from) section above).  It has an [illustrated guide](https://www.home-assistant.io/integrations/nest/) that you may find helpful. You can also try reaching out to others in [Discussions](https://github.com/potmat/homebridge-google-nest-sdm/discussions), on [Discord](https://discord.gg/kqNCe2D), or [Reddit](https://www.reddit.com/r/homebridge/), some people there may be able to help.
-
-**Q**: Do I really have to pay $5 to use the API?
-
-**A**: Yup.
-
-**Q**: Isn't there already a Nest plugin for Homebridge that does more stuff than this?
-
-**A**: Yup.
-
-**Q**: So why this plugin?  
-
-**A**: Well, the "official" Homebridge Nest plugin(s) use undocumented APIs.  That is, the authors reverse engineered the APIs the Nest app itself uses.  Don't get me wrong, I have no problem with that. But the SDM API is a documented API for precisely this use case.  The more important reason for making this plugin is the same as the reason for climbing a mountain, because you can.
-
-**Q**: I just added a Nest device to my account, but it's not showing up in Home. Why?
-
-**A**: You need to visit the ["ONE IMPORTANT DIFFERENCE"](https://github.com/potmat/homebridge-google-nest-sdm#where-do-the-config-values-come-from) URL again.  Here you will choose which Nest devices to authorize, you should see your new device here.  After you finish the process and get a new refresh token restart Homebridge, your device should now be visible.
-
-
+Not affiliated with, provided, endorsed, or supported by Google. For personal, non-commercial use; review the [Google SDM Terms of Service](https://developers.google.com/nest/device-access/tos).

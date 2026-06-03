@@ -1,4 +1,23 @@
 "use strict";
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    Object.defineProperty(o, k2, { enumerable: true, get: function() { return m[k]; } });
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || function (mod) {
+    if (mod && mod.__esModule) return mod;
+    var result = {};
+    if (mod != null) for (var k in mod) if (k !== "default" && Object.prototype.hasOwnProperty.call(mod, k)) __createBinding(result, mod, k);
+    __setModuleDefault(result, mod);
+    return result;
+};
 var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
@@ -11,6 +30,8 @@ const FfMpegProcess_1 = require("./FfMpegProcess");
 const NestStreamer_1 = require("./NestStreamer");
 const HksvStreamer_1 = __importDefault(require("./HksvStreamer"));
 const pick_port_1 = __importDefault(require("pick-port"));
+const SnapshotRefresher = __importStar(require("./SnapshotRefresher"));
+const util_1 = require("./util");
 class StreamingDelegate {
     constructor(log, api, platform, camera, accessory) {
         // keep track of sessions
@@ -246,6 +267,14 @@ class StreamingDelegate {
         if (this.platform.debugMode) {
             ffmpegArgs += ' -loglevel level+verbose';
         }
+        // Snapshot cache: while a live view is up, also write a throttled JPEG so the Home
+        // app tile shows the last-viewed frame. Passed as discrete args (not in the
+        // whitespace-split arg string) so a cache path containing spaces survives.
+        const snapshotArgs = SnapshotRefresher.isConfigured()
+            ? ['-map', '0:v', '-r', '1', '-vf', 'scale=640:-2', '-q:v', '5', '-update', '1', '-f', 'image2', '-y',
+                SnapshotRefresher.snapshotPathFor(this.camera.getName())]
+            : [];
+        const ffmpegPath = (0, util_1.resolveFfmpegPath)(this.config.ffmpegPath);
         const activeSession = { streamer: nestStreamer };
         try {
             activeSession.socket = (0, dgram_1.createSocket)(sessionInfo.ipv6 ? 'udp6' : 'udp4');
@@ -269,7 +298,7 @@ class StreamingDelegate {
             this.logThenCallback(callback, error);
             return;
         }
-        activeSession.mainProcess = new FfMpegProcess_1.FfmpegProcess(this.camera.getDisplayName(), request.sessionID, ffmpegArgs, nestStream.stdin, this.log, this.platform.debugMode, this, callback);
+        activeSession.mainProcess = new FfMpegProcess_1.FfmpegProcess(this.camera.getDisplayName(), request.sessionID, ffmpegArgs, nestStream.stdin, this.log, this.platform.debugMode, this, callback, ffmpegPath, snapshotArgs);
         this.ongoingSessions[request.sessionID] = activeSession;
         delete this.pendingSessions[request.sessionID];
     }
@@ -414,7 +443,7 @@ class StreamingDelegate {
             : [];
         const nestStreamer = await (0, NestStreamer_1.getStreamer)(this.log, this.camera);
         const nestStream = await nestStreamer.initialize();
-        const hksvStreamer = new HksvStreamer_1.default(this.log, nestStream, audioArgs, videoArgs, this.platform.debugMode);
+        const hksvStreamer = new HksvStreamer_1.default(this.log, nestStream, audioArgs, videoArgs, this.platform.debugMode, (0, util_1.resolveFfmpegPath)(this.config.ffmpegPath));
         this.recordingSessionInfo = {
             hksvStreamer: hksvStreamer,
             nestStreamer: nestStreamer
@@ -446,6 +475,11 @@ class StreamingDelegate {
         }
         catch (error) {
             this.log.error("Encountered unexpected error on generator " + error.stack);
+        }
+        finally {
+            // Guarantee the HKSV ffmpeg + SDM stream are torn down when the generator ends,
+            // even if HomeKit never calls closeRecordingStream (addresses orphaned ffmpeg).
+            this.closeRecordingStream(streamId, undefined);
         }
     }
     updateRecordingActive(active) {

@@ -21,6 +21,7 @@ import EcoMode = require('./EcoMode');
 import {FanAccessory} from "./FanAccessory";
 import {Device} from "./sdm/Device";
 import {UnknownDevice} from "./sdm/UnknownDevice";
+import * as SnapshotRefresher from "./SnapshotRefresher";
 
 let IEcoMode: any;
 
@@ -59,6 +60,17 @@ export class Platform implements DynamicPlatformPlugin {
         // to start discovery of new accessories.
         this.api.on('didFinishLaunching', () => {
             log.debug('Executed didFinishLaunching callback');
+            // Configure the snapshot refresher once, rooted at the Homebridge storage path
+            // (NOT os.homedir(), which is wrong under non-login service accounts).
+            SnapshotRefresher.configure({
+                storagePath: this.api.user.storagePath(),
+                ffmpegPath: this.config.ffmpegPath,
+                enabled: this.config.snapshotRefresh !== false,
+                appOpenEnabled: this.config.snapshotRefreshOnAppOpen !== false,
+                spacingMs: (this.config.snapshotRefreshSpacing ?? 30) * 1000,
+                ttlMs: (this.config.snapshotRefreshTtl ?? 15) * 60000,
+                log: this.log,
+            });
             // run the method to discover / register your devices as accessories
             this.discoverDevices();
         });

@@ -5,6 +5,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.Device = void 0;
 const lodash_1 = __importDefault(require("lodash"));
+const util_1 = require("../util");
 class Device {
     constructor(smartdevicemanagement, device, log) {
         this.smartdevicemanagement = smartdevicemanagement;
@@ -35,7 +36,7 @@ class Device {
             this.lastRefresh = Date.now();
         }
         catch (error) {
-            this.log.error('Could not execute device GET request: ', JSON.stringify(error), this.getDisplayName());
+            this.log.error('Could not execute device GET request: ' + (0, util_1.summarizeError)(error), this.getDisplayName());
         }
     }
     async getTrait(name) {
@@ -66,7 +67,7 @@ class Device {
             return response.data.results;
         }
         catch (error) {
-            this.log.error('Could not execute device command: ', JSON.stringify(error), this.getDisplayName());
+            this.log.error('Could not execute device command: ' + (0, util_1.summarizeError)(error), this.getDisplayName());
         }
         return undefined;
     }

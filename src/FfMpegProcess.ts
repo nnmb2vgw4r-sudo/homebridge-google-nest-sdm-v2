@@ -2,20 +2,22 @@ import { ChildProcess, spawn } from 'child_process';
 import {CameraController, Logger, StreamRequestCallback} from 'homebridge';
 import {Readable, Writable} from 'stream';
 import { StreamingDelegate } from './StreamingDelegate';
+import { resolveFfmpegPath } from './util';
 
 export class FfmpegProcess {
     private readonly process: ChildProcess;
 
     constructor(cameraName: string, sessionId: string, ffmpegArgs: string, stdin: string | null | undefined, log: Logger,
-                debug: boolean, delegate: StreamingDelegate<CameraController>, callback?: StreamRequestCallback) {
-        let pathToFfmpeg = require('ffmpeg-for-homebridge');
-        if (!pathToFfmpeg)
-            pathToFfmpeg = 'ffmpeg';
+                debug: boolean, delegate: StreamingDelegate<CameraController>, callback?: StreamRequestCallback,
+                ffmpegPath?: string, extraArgs?: string[]) {
+        const pathToFfmpeg = resolveFfmpegPath(ffmpegPath);
 
         log.debug(`Stream command: ${pathToFfmpeg} ${ffmpegArgs} ${stdin}`, cameraName);
 
+        // extraArgs are passed as discrete tokens (not whitespace-split) so values that
+        // may contain spaces — e.g. a snapshot cache path — survive intact.
         let started = false;
-        this.process = spawn(pathToFfmpeg, ffmpegArgs.split(/\s+/), { env: process.env, stdio: 'pipe' });
+        this.process = spawn(pathToFfmpeg, ffmpegArgs.split(/\s+/).concat(extraArgs ?? []), { env: process.env, stdio: 'pipe' });
 
         if (!this.process.stdin && stdin) {
             log.error('FFmpegProcess failed to start stream: input to ffmpeg was provided as stdin, but the process does not support stdin.', cameraName);

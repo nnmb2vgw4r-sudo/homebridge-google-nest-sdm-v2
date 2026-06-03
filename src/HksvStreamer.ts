@@ -4,6 +4,7 @@ import { AddressInfo, createServer, Server, Socket } from "net";
 import {Logger} from "homebridge";
 import {Readable} from "stream";
 import {NestStream} from "./NestStreamer";
+import {resolveFfmpegPath} from "./util";
 
 interface MP4Atom {
     header: Buffer;
@@ -27,7 +28,7 @@ export default class HksvStreamer {
     connectPromise: Promise<void>;
     connectResolve?: () => void;
 
-    constructor(log: Logger, nestStream: NestStream, audioOutputArgs: Array<string>, videoOutputArgs: Array<string>, debugMode: boolean) {
+    constructor(log: Logger, nestStream: NestStream, audioOutputArgs: Array<string>, videoOutputArgs: Array<string>, debugMode: boolean, ffmpegPath?: string) {
         this.nestStream = nestStream;
         this.debugMode = debugMode;
         this.log = log;
@@ -35,9 +36,7 @@ export default class HksvStreamer {
 
         this.server = createServer(this.handleConnection.bind(this));
 
-        this.ffmpegPath = require('ffmpeg-for-homebridge');
-        if (!this.ffmpegPath)
-            this.ffmpegPath = 'ffmpeg';
+        this.ffmpegPath = resolveFfmpegPath(ffmpegPath);
 
         this.args = [];
 
@@ -111,9 +110,21 @@ export default class HksvStreamer {
     destroy() {
         this.log.debug('HksvStreamer destroy command received, ending process.');
 
-        this.childProcess?.kill();
-        this.childProcess = undefined;
         this.destroyed = true;
+
+        // Hardened teardown (addresses orphaned-ffmpeg / growing memory): a plain kill()
+        // sends SIGTERM, which a stalled ffmpeg can ignore. Escalate to SIGKILL after a
+        // short grace, and always release the listening server + socket.
+        const cp = this.childProcess;
+        this.childProcess = undefined;
+        if (cp) {
+            try { cp.kill('SIGTERM'); } catch (e) { /* ignore */ }
+            setTimeout(() => { try { cp.kill('SIGKILL'); } catch (e) { /* ignore */ } }, 2000).unref();
+        }
+
+        try { this.server?.close(); } catch (e) { /* ignore */ }
+        try { this.socket?.destroy(); } catch (e) { /* ignore */ }
+        this.socket = undefined;
     }
 
     handleDisconnect() {

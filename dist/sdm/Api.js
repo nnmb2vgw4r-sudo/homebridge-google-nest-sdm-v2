@@ -31,6 +31,7 @@ const Doorbell_1 = require("./Doorbell");
 const Thermostat_1 = require("./Thermostat");
 const UnknownDevice_1 = require("./UnknownDevice");
 const Display_1 = require("./Display");
+const util_1 = require("../util");
 class SmartDeviceManagement {
     constructor(config, log) {
         this.subscribed = true;
@@ -82,12 +83,12 @@ class SmartDeviceManagement {
                 }
             });
             this.subscription.on('error', error => {
-                this.log.error("Plugin initialization failed, there was a failure with event subscription. Did you read the readme: https://github.com/potmat/homebridge-google-nest-sdm#where-do-the-config-values-come-from", error);
+                this.log.error("Plugin initialization failed, there was a failure with event subscription. Make sure your refresh token was generated with the Pub/Sub scope - see https://github.com/nnmb2vgw4r-sudo/homebridge-google-nest-sdm-v2#-the-pubsub-scope-step--dont-skip-this -- " + (0, util_1.summarizeError)(error));
                 this.subscribed = false;
             });
         }
         catch (error) {
-            this.log.error("Plugin initialization failed, there was a failure with event subscription. Did you read the readme: https://github.com/potmat/homebridge-google-nest-sdm#where-do-the-config-values-come-from", error);
+            this.log.error("Plugin initialization failed, there was a failure with event subscription. Make sure your refresh token was generated with the Pub/Sub scope - see https://github.com/nnmb2vgw4r-sudo/homebridge-google-nest-sdm-v2#-the-pubsub-scope-step--dont-skip-this -- " + (0, util_1.summarizeError)(error));
             this.subscribed = false;
         }
     }
@@ -116,7 +117,7 @@ class SmartDeviceManagement {
                 .value();
         }
         catch (error) {
-            this.log.error('Could not execute device LIST request: ', JSON.stringify(error));
+            this.log.error('Could not execute device LIST request: ' + (0, util_1.summarizeError)(error));
         }
         return this.devices;
     }

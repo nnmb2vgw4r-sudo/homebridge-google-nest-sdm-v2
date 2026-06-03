@@ -4,17 +4,16 @@ const events_1 = require("events");
 const child_process_1 = require("child_process");
 const net_1 = require("net");
 const stream_1 = require("stream");
+const util_1 = require("./util");
 class HksvStreamer {
-    constructor(log, nestStream, audioOutputArgs, videoOutputArgs, debugMode) {
+    constructor(log, nestStream, audioOutputArgs, videoOutputArgs, debugMode, ffmpegPath) {
         this.destroyed = false;
         this.nestStream = nestStream;
         this.debugMode = debugMode;
         this.log = log;
         this.connectPromise = new Promise(resolve => this.connectResolve = resolve);
         this.server = (0, net_1.createServer)(this.handleConnection.bind(this));
-        this.ffmpegPath = require('ffmpeg-for-homebridge');
-        if (!this.ffmpegPath)
-            this.ffmpegPath = 'ffmpeg';
+        this.ffmpegPath = (0, util_1.resolveFfmpegPath)(ffmpegPath);
         this.args = [];
         this.args.push(...nestStream.args.split(/ /g));
         this.args.push(...audioOutputArgs);
@@ -64,11 +63,33 @@ class HksvStreamer {
         }
     }
     destroy() {
-        var _a;
+        var _a, _b;
         this.log.debug('HksvStreamer destroy command received, ending process.');
-        (_a = this.childProcess) === null || _a === void 0 ? void 0 : _a.kill();
-        this.childProcess = undefined;
         this.destroyed = true;
+        // Hardened teardown (addresses orphaned-ffmpeg / growing memory): a plain kill()
+        // sends SIGTERM, which a stalled ffmpeg can ignore. Escalate to SIGKILL after a
+        // short grace, and always release the listening server + socket.
+        const cp = this.childProcess;
+        this.childProcess = undefined;
+        if (cp) {
+            try {
+                cp.kill('SIGTERM');
+            }
+            catch (e) { /* ignore */ }
+            setTimeout(() => { try {
+                cp.kill('SIGKILL');
+            }
+            catch (e) { /* ignore */ } }, 2000).unref();
+        }
+        try {
+            (_a = this.server) === null || _a === void 0 ? void 0 : _a.close();
+        }
+        catch (e) { /* ignore */ }
+        try {
+            (_b = this.socket) === null || _b === void 0 ? void 0 : _b.destroy();
+        }
+        catch (e) { /* ignore */ }
+        this.socket = undefined;
     }
     handleDisconnect() {
         var _a;

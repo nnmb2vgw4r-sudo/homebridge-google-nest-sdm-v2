@@ -105,7 +105,15 @@ export class WebRtcNestStreamer extends NestStreamer {
         let offer = await this.pc.createOffer();
         await this.pc.setLocalDescription(offer);
 
-        const streamInfo = <GenerateWebRtcStream> await this.camera.generateStream(offer.sdp);
+        const streamInfo = <GenerateWebRtcStream | undefined> await this.camera.generateStream(offer.sdp);
+        if (!streamInfo || !streamInfo.mediaSessionId) {
+            // generateStream() returns undefined when the SDM command failed — most
+            // commonly an HTTP 429 (RESOURCE_EXHAUSTED). Fail with a clear message
+            // instead of throwing a TypeError on `streamInfo.mediaSessionId`.
+            try { await this.pc?.close(); } catch (e) { /* ignore */ }
+            try { await this.udp?.close(); } catch (e) { /* ignore */ }
+            throw new Error('Nest SDM returned no media session (likely rate-limited / HTTP 429). Aborting stream start.');
+        }
         this.token = streamInfo.mediaSessionId;
         await this.pc.setRemoteDescription({
             type: 'answer',

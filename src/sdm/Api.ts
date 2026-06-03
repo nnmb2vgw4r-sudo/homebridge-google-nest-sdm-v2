@@ -10,6 +10,7 @@ import {Doorbell} from "./Doorbell";
 import {Thermostat} from "./Thermostat";
 import {UnknownDevice} from "./UnknownDevice";
 import {Display} from "./Display";
+import {summarizeError} from "../util";
 
 export class SmartDeviceManagement {
     private oauth2Client: google.Auth.OAuth2Client;
@@ -78,11 +79,11 @@ export class SmartDeviceManagement {
                 }
             });
             this.subscription.on('error', error => {
-                this.log.error("Plugin initialization failed, there was a failure with event subscription. Did you read the readme: https://github.com/potmat/homebridge-google-nest-sdm#where-do-the-config-values-come-from", error);
+                this.log.error("Plugin initialization failed, there was a failure with event subscription. Make sure your refresh token was generated with the Pub/Sub scope - see https://github.com/nnmb2vgw4r-sudo/homebridge-google-nest-sdm-v2#-the-pubsub-scope-step--dont-skip-this -- " + summarizeError(error));
                 this.subscribed = false;
             });
         } catch (error: any) {
-            this.log.error("Plugin initialization failed, there was a failure with event subscription. Did you read the readme: https://github.com/potmat/homebridge-google-nest-sdm#where-do-the-config-values-come-from", error);
+            this.log.error("Plugin initialization failed, there was a failure with event subscription. Make sure your refresh token was generated with the Pub/Sub scope - see https://github.com/nnmb2vgw4r-sudo/homebridge-google-nest-sdm-v2#-the-pubsub-scope-step--dont-skip-this -- " + summarizeError(error));
             this.subscribed = false;
         }
     }
@@ -115,7 +116,7 @@ export class SmartDeviceManagement {
                 })
                 .value();
         } catch (error: any) {
-            this.log.error('Could not execute device LIST request: ', JSON.stringify(error));
+            this.log.error('Could not execute device LIST request: ' + summarizeError(error));
         }
 
         return this.devices;

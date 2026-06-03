@@ -8,5 +8,5 @@ exports.PLATFORM_NAME = 'homebridge-google-nest-sdm';
 /**
  * This must match the name of your plugin as defined the package.json
  */
-exports.PLUGIN_NAME = 'homebridge-google-nest-sdm';
+exports.PLUGIN_NAME = 'homebridge-google-nest-sdm-v2';
 //# sourceMappingURL=Settings.js.map

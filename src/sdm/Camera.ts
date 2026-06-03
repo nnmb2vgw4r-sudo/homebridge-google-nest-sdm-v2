@@ -10,6 +10,8 @@ import fs from "fs";
 import path from "path";
 import _ from "lodash";
 import * as Traits from "./Traits";
+import * as SnapshotRefresher from "../SnapshotRefresher";
+import {summarizeError} from "../util";
 
 export class Camera extends Device {
 
@@ -23,6 +25,16 @@ export class Camera extends Device {
 
     async getSnapshot(): Promise<Buffer | undefined> {
         if (this.image) return this.image;
+
+        // Serve a recent frame captured by the snapshot refresher, if one exists, and
+        // (gated/throttled in the refresher) kick off an app-open top-up grab.
+        if (SnapshotRefresher.isConfigured()) {
+            SnapshotRefresher.requestRefresh(this, "app-open");
+            try {
+                const cached = await fs.promises.readFile(SnapshotRefresher.snapshotPathFor(this.getName()));
+                if (cached && cached.length > 0) return cached;
+            } catch (e) { /* no cached frame yet - fall through to placeholder */ }
+        }
 
         //Nest cams do not have any method to get a current snapshot,
         //starting streams up just to retrieve one is slow and will cause
@@ -74,7 +86,7 @@ export class Camera extends Device {
             this.image = Buffer.from(imageResponse.data, 'base64');
             setTimeout(() => this.image = null, 10000);
         } catch (error: any) {
-            this.log.error('Could not execute event image GET request: ', JSON.stringify(error), this.getDisplayName());
+            this.log.error('Could not execute event image GET request: ' + summarizeError(error), this.getDisplayName());
         }
     }
 
@@ -129,6 +141,7 @@ export class Camera extends Device {
                             if (protocol === Traits.ProtocolType.WEB_RTC) {
                                 if (this.onMotion)
                                     this.onMotion();
+                                SnapshotRefresher.requestRefresh(this, "motion");
                             } else {
                                 this.getEventImage((value as Events.CameraMotion).eventId, new Date(event.timestamp))
                                     .then(() => {

@@ -1,45 +1,97 @@
 {
   "pluginAlias": "homebridge-google-nest-sdm",
   "pluginType": "platform",
-  "headerDisplay": "For help getting these values, please see the readme at: https://github.com/potmat/homebridge-google-nest-sdm#where-do-the-config-values-come-from Read it carefully, you must follow the instructions regarding the authorization URL if you want events to work properly.",
+  "headerDisplay": "See the README **Setup** section for how to obtain these values. **IMPORTANT:** when you authorize the account you MUST use the special authorization URL that includes the Pub/Sub scope (`+https://www.googleapis.com/auth/pubsub`), otherwise device events (motion, doorbell, temperature changes) will not work.",
   "singular": "true",
   "schema": {
     "type": "object",
     "properties": {
       "clientId": {
-        "title": "Client ID (e.g. \"780816631155-gbvyo1o7r2pn95qc4ei9d61io4uh48hl.apps.googleusercontent.com\")",
+        "title": "OAuth Client ID",
+        "description": "From Google Cloud Platform. Ends in '.apps.googleusercontent.com' (e.g. \"780816631155-gbvyo1o7r2pn95qc4ei9d61io4uh48hl.apps.googleusercontent.com\"). NOT the Device Access project UUID.",
         "type": "string",
         "required": true
       },
       "clientSecret": {
-        "title": "Client Secret",
+        "title": "OAuth Client Secret",
+        "description": "From Google Cloud Platform, paired with the Client ID above (starts with 'GOCSPX-').",
         "type": "string",
         "required": true
       },
       "projectId": {
-        "title": "SDM Project ID",
+        "title": "Device Access Project ID",
+        "description": "The UUID from the Device Access Console (e.g. \"4f689e03-...\"). This is the SDM 'project' and is NOT your Google Cloud project.",
         "type": "string",
         "required": true
       },
       "refreshToken": {
         "title": "Refresh Token",
+        "description": "Obtained during account authorization. Must be generated using the authorization URL that includes the Pub/Sub scope (see the header note), or events will not work.",
         "type": "string",
         "required": true
       },
       "subscriptionId": {
-        "title": "PubSub Subscription (e.g. \"projects/your-gcp-project-id/subscriptions/your-subscription-id\")",
+        "title": "Pub/Sub Subscription (full path)",
+        "description": "Full path form: \"projects/<gcp-project-id>/subscriptions/<subscription-id>\".",
         "type": "string",
         "required": true
       },
       "gcpProjectId": {
-        "title": "GCP Project ID",
+        "title": "Google Cloud Project ID",
+        "description": "Your Google Cloud project ID (e.g. \"my-project-334315\") — the one the Pub/Sub subscription lives under. Distinct from the Device Access Project ID above.",
         "type": "string",
         "required": false
       },
       "vEncoder": {
         "title": "Video Encoder",
+        "description": "ffmpeg video encoder for camera streams. Default is software 'libx264'. For hardware transcoding set e.g. 'h264_qsv' (Intel Quick Sync), 'h264_videotoolbox' (macOS), 'h264_v4l2m2m'/'h264_vaapi' (Linux), or 'h264_nvenc' (NVIDIA) — your ffmpeg build must include the chosen encoder (see ffmpegPath).",
         "type": "string",
         "required": false
+      },
+      "ffmpegPath": {
+        "title": "Custom ffmpeg Path",
+        "description": "Absolute path to an ffmpeg binary. Leave blank to use the bundled ffmpeg-for-homebridge, then a system 'ffmpeg'. Set this to point at a build that includes your chosen hardware encoder.",
+        "type": "string",
+        "required": false
+      },
+      "snapshotRefresh": {
+        "title": "Refresh Camera Snapshots",
+        "description": "Periodically grab a still from cameras (on motion, and when you open the Home app) so tiles show a recent image instead of a placeholder. Grabs are serialized and rate-limited to avoid Google SDM 429 throttling.",
+        "type": "boolean",
+        "default": true,
+        "required": false
+      },
+      "snapshotRefreshOnAppOpen": {
+        "title": "Refresh On App Open",
+        "description": "Also top up stale tiles when the Home app requests snapshots. More current thumbnails, but each grab is a stream start that counts toward Google SDM rate limits. Disable to refresh on motion only.",
+        "type": "boolean",
+        "default": true,
+        "required": false,
+        "condition": {
+          "functionBody": "return model.snapshotRefresh !== false"
+        }
+      },
+      "snapshotRefreshSpacing": {
+        "title": "Snapshot Refresh Spacing (seconds)",
+        "description": "Minimum seconds between snapshot grabs across all cameras. Lower = fresher tiles but closer to the SDM rate limit (HTTP 429).",
+        "type": "integer",
+        "minimum": 10,
+        "default": 30,
+        "required": false,
+        "condition": {
+          "functionBody": "return model.snapshotRefresh !== false"
+        }
+      },
+      "snapshotRefreshTtl": {
+        "title": "Snapshot Freshness (minutes)",
+        "description": "A tile newer than this is considered fresh and won't be re-grabbed.",
+        "type": "integer",
+        "minimum": 1,
+        "default": 15,
+        "required": false,
+        "condition": {
+          "functionBody": "return model.snapshotRefresh !== false"
+        }
       },
       "showFan": {
         "title": "Show Fan Switch",

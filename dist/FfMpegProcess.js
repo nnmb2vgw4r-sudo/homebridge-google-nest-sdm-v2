@@ -3,14 +3,15 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.FfmpegProcess = void 0;
 const child_process_1 = require("child_process");
 const stream_1 = require("stream");
+const util_1 = require("./util");
 class FfmpegProcess {
-    constructor(cameraName, sessionId, ffmpegArgs, stdin, log, debug, delegate, callback) {
-        let pathToFfmpeg = require('ffmpeg-for-homebridge');
-        if (!pathToFfmpeg)
-            pathToFfmpeg = 'ffmpeg';
+    constructor(cameraName, sessionId, ffmpegArgs, stdin, log, debug, delegate, callback, ffmpegPath, extraArgs) {
+        const pathToFfmpeg = (0, util_1.resolveFfmpegPath)(ffmpegPath);
         log.debug(`Stream command: ${pathToFfmpeg} ${ffmpegArgs} ${stdin}`, cameraName);
+        // extraArgs are passed as discrete tokens (not whitespace-split) so values that
+        // may contain spaces — e.g. a snapshot cache path — survive intact.
         let started = false;
-        this.process = (0, child_process_1.spawn)(pathToFfmpeg, ffmpegArgs.split(/\s+/), { env: process.env, stdio: 'pipe' });
+        this.process = (0, child_process_1.spawn)(pathToFfmpeg, ffmpegArgs.split(/\s+/).concat(extraArgs !== null && extraArgs !== void 0 ? extraArgs : []), { env: process.env, stdio: 'pipe' });
         if (!this.process.stdin && stdin) {
             log.error('FFmpegProcess failed to start stream: input to ffmpeg was provided as stdin, but the process does not support stdin.', cameraName);
             delegate.stopStream(sessionId);

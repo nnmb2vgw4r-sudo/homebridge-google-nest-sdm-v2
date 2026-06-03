@@ -32,6 +32,8 @@ const fs_1 = __importDefault(require("fs"));
 const path_1 = __importDefault(require("path"));
 const lodash_1 = __importDefault(require("lodash"));
 const Traits = __importStar(require("./Traits"));
+const SnapshotRefresher = __importStar(require("../SnapshotRefresher"));
+const util_1 = require("../util");
 class Camera extends Device_1.Device {
     constructor() {
         super(...arguments);
@@ -43,6 +45,17 @@ class Camera extends Device_1.Device {
     async getSnapshot() {
         if (this.image)
             return this.image;
+        // Serve a recent frame captured by the snapshot refresher, if one exists, and
+        // (gated/throttled in the refresher) kick off an app-open top-up grab.
+        if (SnapshotRefresher.isConfigured()) {
+            SnapshotRefresher.requestRefresh(this, "app-open");
+            try {
+                const cached = await fs_1.default.promises.readFile(SnapshotRefresher.snapshotPathFor(this.getName()));
+                if (cached && cached.length > 0)
+                    return cached;
+            }
+            catch (e) { /* no cached frame yet - fall through to placeholder */ }
+        }
         //Nest cams do not have any method to get a current snapshot,
         //starting streams up just to retrieve one is slow and will cause
         //the SDM API to hit a rate limit of creating too many streams
@@ -89,7 +102,7 @@ class Camera extends Device_1.Device {
             setTimeout(() => this.image = null, 10000);
         }
         catch (error) {
-            this.log.error('Could not execute event image GET request: ', JSON.stringify(error), this.getDisplayName());
+            this.log.error('Could not execute event image GET request: ' + (0, util_1.summarizeError)(error), this.getDisplayName());
         }
     }
     async getCameraLiveStream() {
@@ -141,6 +154,7 @@ class Camera extends Device_1.Device {
                         if (protocol === Traits.ProtocolType.WEB_RTC) {
                             if (this.onMotion)
                                 this.onMotion();
+                            SnapshotRefresher.requestRefresh(this, "motion");
                         }
                         else {
                             this.getEventImage(value.eventId, new Date(event.timestamp))
