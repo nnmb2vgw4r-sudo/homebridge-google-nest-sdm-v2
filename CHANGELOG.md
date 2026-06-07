@@ -4,6 +4,39 @@ All notable changes to this fork are documented here. This project is a maintain
 fork of [`homebridge-google-nest-sdm`](https://github.com/potmat/homebridge-google-nest-sdm)
 by potmat; it follows the same ISC license.
 
+## 2.0.2
+
+Follow-up fixes from a full whole-codebase review, including two issues introduced by
+the 2.0.1 hardening.
+
+### Fixed
+- **HKSV SIGKILL escalation never fired (regression in 2.0.1):** the new guard tested
+  `!childProcess.killed`, but Node sets `killed` to `true` the instant a signal is *sent*,
+  so the guard was always false and a stalled ffmpeg was never force-killed. Now checks
+  `exitCode`/`signalCode` (true liveness), restoring the orphaned-process cleanup.
+- **Device list pagination / stale-accessory safety:** `list_devices()` now follows
+  `nextPageToken` and fetches every page. Previously only the first page was read, so on
+  accounts with more devices than one page the 2.0.1 stale-accessory cleanup would
+  unregister (and re-add) every device beyond page one on each run.
+- **Recording-stream leak:** if the SDM stream `initialize()` failed during an HKSV
+  recording request, the partially-opened WebRTC PeerConnection/UDP socket leaked because
+  the session wasn't tracked yet; it is now torn down on failure.
+- **Live-stream leak / crash on missing prepare:** `startStream` now bails cleanly when
+  there is no matching prepared session instead of dereferencing it (which threw after the
+  SDM stream was already opened, leaking it).
+- **Falsy-zero in characteristic values:** `convertToNullable` mapped legitimate `false`
+  and `0` to `null` — most notably reporting `null` for the normal eco-OFF state and for a
+  0°C / 0% reading. It now only nulls `undefined`/`null`.
+- **Unhandled rejection on camera events:** the motion/person/sound event handlers run
+  inside the Pub/Sub message listener; a rejected `getVideoProtocol()` is now caught and
+  logged instead of becoming an unhandled rejection.
+- **Thermostat 0°C handling:** setpoint-range setters and the setpoint-changed event no
+  longer treat a legitimate 0°C value as "unset" (truthy checks replaced with
+  `undefined`/`null` checks; `||` fallbacks replaced with `??`).
+- **HKSV recording audio:** audio is now encoded based on the *value* of the
+  `RecordingAudioActive` characteristic rather than the mere presence of the characteristic
+  object, so disabling recording audio is honored.
+
 ## 2.0.1
 
 Hardening release following a full code review. No config or behavior changes for a

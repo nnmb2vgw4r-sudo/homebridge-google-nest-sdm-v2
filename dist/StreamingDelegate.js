@@ -222,6 +222,12 @@ class StreamingDelegate {
     }
     async startStream(request, callback) {
         const sessionInfo = this.pendingSessions[request.sessionID];
+        if (!sessionInfo) {
+            // No matching prepareStream (it failed/timed out, or this is a stale START). Bail before
+            // opening an SDM stream, otherwise the later sessionInfo.* dereference throws and leaks it.
+            this.logThenCallback(callback, 'No pending session for this stream request.');
+            return;
+        }
         const resolution = StreamingDelegate.determineResolution(request.video);
         const bitrate = request.video.max_bit_rate * 4;
         const vEncoder = this.config.vEncoder || 'libx264 -preset ultrafast -tune zerolatency';
@@ -452,7 +458,9 @@ class StreamingDelegate {
             default:
                 throw new Error("Unsupported audio sample rate: " + this.cameraRecordingConfiguration.audioCodec.samplerate);
         }
-        const audioArgs = ((_b = (_a = this.controller) === null || _a === void 0 ? void 0 : _a.recordingManagement) === null || _b === void 0 ? void 0 : _b.recordingManagementService.getCharacteristic(this.platform.Characteristic.RecordingAudioActive))
+        // Honor the *value* of RecordingAudioActive, not the mere presence of the characteristic
+        // object (which is always truthy) — otherwise audio is encoded even when the user disabled it.
+        const audioArgs = ((_b = (_a = this.controller) === null || _a === void 0 ? void 0 : _a.recordingManagement) === null || _b === void 0 ? void 0 : _b.recordingManagementService.getCharacteristic(this.platform.Characteristic.RecordingAudioActive).value)
             ? [
                 "-acodec", "libfdk_aac",
                 ...(this.cameraRecordingConfiguration.audioCodec.type === 0 /* AAC_LC */ ?
@@ -464,7 +472,17 @@ class StreamingDelegate {
             ]
             : [];
         const nestStreamer = await (0, NestStreamer_1.getStreamer)(this.log, this.camera);
-        const nestStream = await nestStreamer.initialize();
+        let nestStream;
+        try {
+            nestStream = await nestStreamer.initialize();
+        }
+        catch (error) {
+            // initialize() may open the WebRTC PeerConnection/UDP socket before failing. recordingSessionInfo
+            // is not set yet, so closeRecordingStream() can't clean up — tear down here before rethrowing.
+            await nestStreamer.teardown();
+            this.handlingRecordingStreamingRequest = false;
+            throw error;
+        }
         const hksvStreamer = new HksvStreamer_1.default(this.log, nestStream, audioArgs, videoArgs, this.platform.debugMode, (0, util_1.resolveFfmpegPath)(this.config.ffmpegPath));
         this.recordingSessionInfo = {
             hksvStreamer: hksvStreamer,

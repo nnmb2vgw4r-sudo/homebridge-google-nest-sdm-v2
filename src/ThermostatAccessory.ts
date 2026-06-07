@@ -214,9 +214,9 @@ export class ThermostatAccessory extends Accessory<Thermostat> {
 
     private handleTargetTemperatureRangeUpdate(range: TemperatureRange) {
         this.log.debug('Update TargetTemperatureRange:' + range, this.accessory.displayName);
-        if (range.heat)
+        if (range.heat != null)
             this.service.updateCharacteristic(this.platform.Characteristic.HeatingThresholdTemperature, range.heat);
-        if (range.cool)
+        if (range.cool != null)
             this.service.updateCharacteristic(this.platform.Characteristic.CoolingThresholdTemperature, range.cool);
     }
 

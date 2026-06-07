@@ -102,12 +102,23 @@ class SmartDeviceManagement {
         }
     }
     async list_devices() {
+        var _a;
         if (!this.subscribed)
             return this.devices;
         try {
-            const response = await this.smartdevicemanagement.enterprises.devices.list({ parent: `enterprises/${this.projectId}` });
-            this.log.debug('Receieved list of devices: ', response.data.devices);
-            this.devices = (0, lodash_1.default)(response.data.devices)
+            // Follow nextPageToken to fetch ALL devices. Without this we only ever see the first
+            // page; combined with the stale-accessory cleanup in Platform.discoverDevices, any
+            // device beyond page one would be unregistered (and oscillate) on every run.
+            const rawDevices = [];
+            let pageToken = undefined;
+            do {
+                const response = await this.smartdevicemanagement.enterprises.devices.list({ parent: `enterprises/${this.projectId}`, pageToken });
+                if (response.data.devices)
+                    rawDevices.push(...response.data.devices);
+                pageToken = (_a = response.data.nextPageToken) !== null && _a !== void 0 ? _a : undefined;
+            } while (pageToken);
+            this.log.debug('Receieved list of devices: ', rawDevices);
+            this.devices = (0, lodash_1.default)(rawDevices)
                 .filter(device => device.name !== null)
                 .map(device => {
                 switch (device.type) {

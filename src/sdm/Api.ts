@@ -101,11 +101,22 @@ export class SmartDeviceManagement {
             return this.devices;
 
         try {
-            const response = await this.smartdevicemanagement.enterprises.devices.list({parent: `enterprises/${this.projectId}`})
+            // Follow nextPageToken to fetch ALL devices. Without this we only ever see the first
+            // page; combined with the stale-accessory cleanup in Platform.discoverDevices, any
+            // device beyond page one would be unregistered (and oscillate) on every run.
+            const rawDevices: google.smartdevicemanagement_v1.Schema$GoogleHomeEnterpriseSdmV1Device[] = [];
+            let pageToken: string | undefined = undefined;
+            do {
+                const response: { data: google.smartdevicemanagement_v1.Schema$GoogleHomeEnterpriseSdmV1ListDevicesResponse } =
+                    await this.smartdevicemanagement.enterprises.devices.list({parent: `enterprises/${this.projectId}`, pageToken});
+                if (response.data.devices)
+                    rawDevices.push(...response.data.devices);
+                pageToken = response.data.nextPageToken ?? undefined;
+            } while (pageToken);
 
-            this.log.debug('Receieved list of devices: ', response.data.devices)
+            this.log.debug('Receieved list of devices: ', rawDevices)
 
-            this.devices = _(response.data.devices)
+            this.devices = _(rawDevices)
                 .filter(device => device.name !== null)
                 .map(device => {
                     switch (device.type) {

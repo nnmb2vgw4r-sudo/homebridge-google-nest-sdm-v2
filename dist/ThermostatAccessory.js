@@ -190,9 +190,9 @@ class ThermostatAccessory extends Accessory_1.Accessory {
     }
     handleTargetTemperatureRangeUpdate(range) {
         this.log.debug('Update TargetTemperatureRange:' + range, this.accessory.displayName);
-        if (range.heat)
+        if (range.heat != null)
             this.service.updateCharacteristic(this.platform.Characteristic.HeatingThresholdTemperature, range.heat);
-        if (range.cool)
+        if (range.cool != null)
             this.service.updateCharacteristic(this.platform.Characteristic.CoolingThresholdTemperature, range.cool);
     }
     handleCurrentRelativeHumidityUpdate(humidity) {

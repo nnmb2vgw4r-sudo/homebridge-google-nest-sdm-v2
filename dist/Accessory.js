@@ -18,7 +18,9 @@ class Accessory {
     }
     async convertToNullable(input) {
         const result = await input;
-        if (!result)
+        // Only null/undefined map to null. A falsy check here wrongly nulled legitimate values:
+        // EcoMode `false` (the normal eco-OFF case) and a 0°C / 0% reading.
+        if (result === undefined || result === null)
             return null;
         return result;
     }

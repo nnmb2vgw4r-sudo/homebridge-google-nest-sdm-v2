@@ -120,9 +120,13 @@ export default class HksvStreamer {
         if (cp) {
             try { cp.kill('SIGTERM'); } catch (e) { /* ignore */ }
             setTimeout(() => {
-                // Only escalate if it actually survived SIGTERM; killing a reaped PID is a no-op in
-                // Node but the guard avoids the needless syscall and keeps the intent clear.
-                if (!cp.killed) { try { cp.kill('SIGKILL'); } catch (e) { /* ignore */ } }
+                // Escalate only if the process is still alive. NOTE: cp.killed is NOT that signal —
+                // Node sets it true the moment a signal is *sent* (above), so `!cp.killed` would
+                // always be false and SIGKILL would never fire. exitCode/signalCode stay null until
+                // the process actually terminates, so they are the correct liveness check.
+                if (cp.exitCode === null && cp.signalCode === null) {
+                    try { cp.kill('SIGKILL'); } catch (e) { /* ignore */ }
+                }
             }, 2000).unref();
         }
 

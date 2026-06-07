@@ -143,13 +143,16 @@ export class Camera extends Device {
                                     this.onMotion();
                                 SnapshotRefresher.requestRefresh(this, "motion");
                             } else {
-                                this.getEventImage((value as Events.CameraMotion).eventId, new Date(event.timestamp))
+                                return this.getEventImage((value as Events.CameraMotion).eventId, new Date(event.timestamp))
                                     .then(() => {
                                         if (this.onMotion)
                                             this.onMotion();
                                     });
                             }
-                        });
+                        })
+                        // This runs inside a Pub/Sub message listener; without a catch a rejected
+                        // getVideoProtocol() (e.g. a transient SDM/network error) is an unhandled rejection.
+                        .catch(error => this.log.error('Error handling camera motion/person event: ' + summarizeError(error), this.getDisplayName()));
                     break;
                 case Events.Constants.CameraSound:
 
@@ -159,9 +162,10 @@ export class Camera extends Device {
                     this.getVideoProtocol()
                         .then(protocol => {
                             if (protocol === Traits.ProtocolType.RTSP) {
-                                this.getEventImage((value as Events.CameraSound).eventId, new Date(event.timestamp));
+                                return this.getEventImage((value as Events.CameraSound).eventId, new Date(event.timestamp));
                             }
-                        });
+                        })
+                        .catch(error => this.log.error('Error handling camera sound event: ' + summarizeError(error), this.getDisplayName()));
                     break;
             }
         });
