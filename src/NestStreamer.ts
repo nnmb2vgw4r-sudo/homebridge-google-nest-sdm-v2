@@ -121,8 +121,12 @@ export class WebRtcNestStreamer extends NestStreamer {
             // commonly an HTTP 429 (RESOURCE_EXHAUSTED). Fail with a clear message
             // instead of throwing a TypeError on `streamInfo.mediaSessionId`.
             if (this.pliTimer) { clearInterval(this.pliTimer); this.pliTimer = undefined; }
+            // Close and null out so the teardown() that runs in the caller's finally doesn't
+            // double-close (which would throw "Not running" / log a spurious error).
             try { this.pc?.close(); } catch (e) { /* ignore */ }
             try { this.udp?.close(); } catch (e) { /* ignore */ }
+            this.pc = undefined;
+            this.udp = undefined;
             throw new Error('Nest SDM returned no media session (likely rate-limited / HTTP 429). Aborting stream start.');
         }
         this.token = streamInfo.mediaSessionId;
@@ -173,12 +177,20 @@ a=sendrecv`
         } catch (error: any) {
             this.log.error('Error closing peer connection: ' + summarizeError(error));
         }
+        this.pc = undefined;
 
         try {
             this.udp?.close();
         } catch (error: any) {
-            this.log.error('Error closing UDP connection to FFMpeg: ' + summarizeError(error));
+            // A grab on a camera that never streamed (or an already-closed socket) leaves the dgram
+            // socket unbound; close() then throws ERR_SOCKET_DGRAM_NOT_RUNNING. That's benign — log
+            // it at debug rather than as an error so normal snapshot churn doesn't spam the log.
+            if (error?.code === 'ERR_SOCKET_DGRAM_NOT_RUNNING')
+                this.log.debug('UDP socket to FFMpeg was not running at teardown (benign).');
+            else
+                this.log.error('Error closing UDP connection to FFMpeg: ' + summarizeError(error));
         }
+        this.udp = undefined;
     }
 }
 

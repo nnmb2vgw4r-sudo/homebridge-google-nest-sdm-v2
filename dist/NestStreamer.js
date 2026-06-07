@@ -125,6 +125,8 @@ class WebRtcNestStreamer extends NestStreamer {
                 clearInterval(this.pliTimer);
                 this.pliTimer = undefined;
             }
+            // Close and null out so the teardown() that runs in the caller's finally doesn't
+            // double-close (which would throw "Not running" / log a spurious error).
             try {
                 (_a = this.pc) === null || _a === void 0 ? void 0 : _a.close();
             }
@@ -133,6 +135,8 @@ class WebRtcNestStreamer extends NestStreamer {
                 (_b = this.udp) === null || _b === void 0 ? void 0 : _b.close();
             }
             catch (e) { /* ignore */ }
+            this.pc = undefined;
+            this.udp = undefined;
             throw new Error('Nest SDM returned no media session (likely rate-limited / HTTP 429). Aborting stream start.');
         }
         this.token = streamInfo.mediaSessionId;
@@ -182,12 +186,20 @@ a=sendrecv`
         catch (error) {
             this.log.error('Error closing peer connection: ' + (0, util_1.summarizeError)(error));
         }
+        this.pc = undefined;
         try {
             (_b = this.udp) === null || _b === void 0 ? void 0 : _b.close();
         }
         catch (error) {
-            this.log.error('Error closing UDP connection to FFMpeg: ' + (0, util_1.summarizeError)(error));
+            // A grab on a camera that never streamed (or an already-closed socket) leaves the dgram
+            // socket unbound; close() then throws ERR_SOCKET_DGRAM_NOT_RUNNING. That's benign — log
+            // it at debug rather than as an error so normal snapshot churn doesn't spam the log.
+            if ((error === null || error === void 0 ? void 0 : error.code) === 'ERR_SOCKET_DGRAM_NOT_RUNNING')
+                this.log.debug('UDP socket to FFMpeg was not running at teardown (benign).');
+            else
+                this.log.error('Error closing UDP connection to FFMpeg: ' + (0, util_1.summarizeError)(error));
         }
+        this.udp = undefined;
     }
 }
 exports.WebRtcNestStreamer = WebRtcNestStreamer;

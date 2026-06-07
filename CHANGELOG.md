@@ -4,6 +4,16 @@ All notable changes to this fork are documented here. This project is a maintain
 fork of [`homebridge-google-nest-sdm`](https://github.com/potmat/homebridge-google-nest-sdm)
 by potmat; it follows the same ISC license.
 
+## 2.0.3
+
+### Fixed
+- **Spurious "Error closing UDP connection to FFMpeg: Not running" log.** A snapshot grab
+  on a camera that never streamed (e.g. "not available for streaming" / no media session)
+  left the dgram socket unbound, so `teardown()` logged an error-level message on a normal
+  path. The WebRTC streamer now nulls the peer connection/socket after closing (so the
+  caller's `finally` teardown can't double-close) and treats `ERR_SOCKET_DGRAM_NOT_RUNNING`
+  as benign (debug, not error).
+
 ## 2.0.2
 
 Follow-up fixes from a full whole-codebase review, including two issues introduced by
