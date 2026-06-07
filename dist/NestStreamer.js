@@ -27,6 +27,7 @@ const dgram_1 = require("dgram");
 const werift_1 = require("werift");
 const Traits = __importStar(require("./sdm/Traits"));
 const pick_port_1 = __importDefault(require("pick-port"));
+const util_1 = require("./util");
 class NestStreamer {
     constructor(log, camera) {
         this.log = log;
@@ -43,7 +44,14 @@ class RtspNestStreamer extends NestStreamer {
         };
     }
     async teardown() {
-        await this.camera.stopStream(this.token);
+        if (!this.token)
+            return;
+        try {
+            await this.camera.stopStream(this.token);
+        }
+        catch (error) {
+            this.log.error('Error stopping camera stream: ' + (0, util_1.summarizeError)(error));
+        }
     }
 }
 exports.RtspNestStreamer = RtspNestStreamer;
@@ -98,7 +106,11 @@ class WebRtcNestStreamer extends NestStreamer {
                 this.udp.send(rtp.serialize(), videoPort, "127.0.0.1");
             });
             track.onReceiveRtp.once(() => {
-                setInterval(() => videoTransceiver.receiver.sendRtcpPLI(track.ssrc), 2000);
+                var _a, _b;
+                // Keep-alive keyframe requests. MUST be cleared in teardown() — otherwise every
+                // stream/snapshot/recording leaks a timer firing on a closed receiver forever.
+                this.pliTimer = setInterval(() => videoTransceiver.receiver.sendRtcpPLI(track.ssrc), 2000);
+                (_b = (_a = this.pliTimer).unref) === null || _b === void 0 ? void 0 : _b.call(_a);
             });
         });
         this.pc.createDataChannel('dataSendChannel', { id: 1 });
@@ -109,12 +121,16 @@ class WebRtcNestStreamer extends NestStreamer {
             // generateStream() returns undefined when the SDM command failed — most
             // commonly an HTTP 429 (RESOURCE_EXHAUSTED). Fail with a clear message
             // instead of throwing a TypeError on `streamInfo.mediaSessionId`.
+            if (this.pliTimer) {
+                clearInterval(this.pliTimer);
+                this.pliTimer = undefined;
+            }
             try {
-                await ((_a = this.pc) === null || _a === void 0 ? void 0 : _a.close());
+                (_a = this.pc) === null || _a === void 0 ? void 0 : _a.close();
             }
             catch (e) { /* ignore */ }
             try {
-                await ((_b = this.udp) === null || _b === void 0 ? void 0 : _b.close());
+                (_b = this.udp) === null || _b === void 0 ? void 0 : _b.close();
             }
             catch (e) { /* ignore */ }
             throw new Error('Nest SDM returned no media session (likely rate-limited / HTTP 429). Aborting stream start.');
@@ -148,23 +164,29 @@ a=sendrecv`
     }
     async teardown() {
         var _a, _b;
+        if (this.pliTimer) {
+            clearInterval(this.pliTimer);
+            this.pliTimer = undefined;
+        }
+        if (this.token) {
+            try {
+                await this.camera.stopStream(this.token);
+            }
+            catch (error) {
+                this.log.error('Error stopping camera stream: ' + (0, util_1.summarizeError)(error));
+            }
+        }
         try {
-            await this.camera.stopStream(this.token);
+            (_a = this.pc) === null || _a === void 0 ? void 0 : _a.close();
         }
         catch (error) {
-            this.log.error('Error stopping camera stream.', error);
+            this.log.error('Error closing peer connection: ' + (0, util_1.summarizeError)(error));
         }
         try {
-            await ((_a = this.pc) === null || _a === void 0 ? void 0 : _a.close());
+            (_b = this.udp) === null || _b === void 0 ? void 0 : _b.close();
         }
         catch (error) {
-            this.log.error('Error closing peer connection.', error);
-        }
-        try {
-            await ((_b = this.udp) === null || _b === void 0 ? void 0 : _b.close());
-        }
-        catch (error) {
-            this.log.error('Error closing UDP connection to FFMpeg.', error);
+            this.log.error('Error closing UDP connection to FFMpeg: ' + (0, util_1.summarizeError)(error));
         }
     }
 }

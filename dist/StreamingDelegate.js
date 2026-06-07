@@ -115,7 +115,14 @@ class StreamingDelegate {
     handleSnapshotRequest(request, callback) {
         this.camera.getSnapshot()
             .then(result => {
-            callback(undefined, result);
+            if (result)
+                callback(undefined, result);
+            else
+                callback(new Error('No snapshot available'));
+        })
+            .catch(error => {
+            this.log.error('Snapshot request failed: ' + (0, util_1.summarizeError)(error), this.camera.getDisplayName());
+            callback(error instanceof Error ? error : new Error(String(error)));
         });
     }
     static determineResolution(request) {
@@ -159,54 +166,59 @@ class StreamingDelegate {
         callback(new Error(message));
     }
     async prepareStream(request, callback) {
-        const camaraInfo = await this.camera.getCameraLiveStream();
-        if (!camaraInfo) {
-            this.logThenCallback(callback, 'Unable to start stream! Camera info was not received');
-            return;
-        }
-        const ipv6 = request.addressVersion === 'ipv6';
-        const options = {
-            type: 'udp',
-            ip: ipv6 ? '::' : '0.0.0.0',
-            reserveTimeout: 15
-        };
-        const videoReturnPort = await (0, pick_port_1.default)(options);
-        const videoSSRC = this.hap.CameraController.generateSynchronisationSource();
-        const audioReturnPort = await (0, pick_port_1.default)(options);
-        const audioSSRC = this.hap.CameraController.generateSynchronisationSource();
-        const currentAddress = await this.getIpAddress(ipv6);
-        const sessionInfo = {
-            address: request.targetAddress,
-            localAddress: currentAddress,
-            ipv6: ipv6,
-            videoPort: request.video.port,
-            videoReturnPort: videoReturnPort,
-            videoCryptoSuite: request.video.srtpCryptoSuite,
-            videoSRTP: Buffer.concat([request.video.srtp_key, request.video.srtp_salt]),
-            videoSSRC: videoSSRC,
-            audioPort: request.audio.port,
-            audioReturnPort: audioReturnPort,
-            audioCryptoSuite: request.audio.srtpCryptoSuite,
-            audioSRTP: Buffer.concat([request.audio.srtp_key, request.audio.srtp_salt]),
-            audioSSRC: audioSSRC
-        };
-        const response = {
-            address: currentAddress,
-            video: {
-                port: videoReturnPort,
-                ssrc: videoSSRC,
-                srtp_key: request.video.srtp_key,
-                srtp_salt: request.video.srtp_salt
-            },
-            audio: {
-                port: audioReturnPort,
-                ssrc: audioSSRC,
-                srtp_key: request.audio.srtp_key,
-                srtp_salt: request.audio.srtp_salt
+        try {
+            const camaraInfo = await this.camera.getCameraLiveStream();
+            if (!camaraInfo) {
+                this.logThenCallback(callback, 'Unable to start stream! Camera info was not received');
+                return;
             }
-        };
-        this.pendingSessions[request.sessionID] = sessionInfo;
-        callback(undefined, response);
+            const ipv6 = request.addressVersion === 'ipv6';
+            const options = {
+                type: 'udp',
+                ip: ipv6 ? '::' : '0.0.0.0',
+                reserveTimeout: 15
+            };
+            const videoReturnPort = await (0, pick_port_1.default)(options);
+            const videoSSRC = this.hap.CameraController.generateSynchronisationSource();
+            const audioReturnPort = await (0, pick_port_1.default)(options);
+            const audioSSRC = this.hap.CameraController.generateSynchronisationSource();
+            const currentAddress = await this.getIpAddress(ipv6);
+            const sessionInfo = {
+                address: request.targetAddress,
+                localAddress: currentAddress,
+                ipv6: ipv6,
+                videoPort: request.video.port,
+                videoReturnPort: videoReturnPort,
+                videoCryptoSuite: request.video.srtpCryptoSuite,
+                videoSRTP: Buffer.concat([request.video.srtp_key, request.video.srtp_salt]),
+                videoSSRC: videoSSRC,
+                audioPort: request.audio.port,
+                audioReturnPort: audioReturnPort,
+                audioCryptoSuite: request.audio.srtpCryptoSuite,
+                audioSRTP: Buffer.concat([request.audio.srtp_key, request.audio.srtp_salt]),
+                audioSSRC: audioSSRC
+            };
+            const response = {
+                address: currentAddress,
+                video: {
+                    port: videoReturnPort,
+                    ssrc: videoSSRC,
+                    srtp_key: request.video.srtp_key,
+                    srtp_salt: request.video.srtp_salt
+                },
+                audio: {
+                    port: audioReturnPort,
+                    ssrc: audioSSRC,
+                    srtp_key: request.audio.srtp_key,
+                    srtp_salt: request.audio.srtp_salt
+                }
+            };
+            this.pendingSessions[request.sessionID] = sessionInfo;
+            callback(undefined, response);
+        }
+        catch (error) {
+            this.logThenCallback(callback, 'Failed to prepare stream: ' + (0, util_1.summarizeError)(error));
+        }
     }
     async startStream(request, callback) {
         const sessionInfo = this.pendingSessions[request.sessionID];
@@ -222,7 +234,8 @@ class StreamingDelegate {
             ffmpegArgs = nestStream.args;
         }
         catch (error) {
-            this.logThenCallback(callback, error);
+            await nestStreamer.teardown();
+            this.logThenCallback(callback, (0, util_1.summarizeError)(error));
             return;
         }
         ffmpegArgs += // Video
@@ -295,7 +308,8 @@ class StreamingDelegate {
             activeSession.socket.bind(sessionInfo.videoReturnPort, sessionInfo.localAddress);
         }
         catch (error) {
-            this.logThenCallback(callback, error);
+            await nestStreamer.teardown();
+            this.logThenCallback(callback, (0, util_1.summarizeError)(error));
             return;
         }
         activeSession.mainProcess = new FfMpegProcess_1.FfmpegProcess(this.camera.getDisplayName(), request.sessionID, ffmpegArgs, nestStream.stdin, this.log, this.platform.debugMode, this, callback, ffmpegPath, snapshotArgs);
@@ -305,7 +319,15 @@ class StreamingDelegate {
     async handleStreamRequest(request, callback) {
         switch (request.type) {
             case "start" /* START */:
-                this.startStream(request, callback);
+                try {
+                    await this.startStream(request, callback);
+                }
+                catch (error) {
+                    // startStream is otherwise fire-and-forget; without this a reject (e.g. a 429 from the
+                    // SDM call before the inner try) would be an unhandled rejection that can crash the bridge.
+                    this.log.error('Failed to start stream: ' + (0, util_1.summarizeError)(error), this.camera.getDisplayName());
+                    callback(error instanceof Error ? error : new Error(String(error)));
+                }
                 break;
             case "reconfigure" /* RECONFIGURE */:
                 this.log.debug(`Received request to reconfigure: ${request.video.width} x ${request.video.height}, ${request.video.fps} fps, ${request.video.max_bit_rate} kbps (Ignored)`, this.camera.getDisplayName());
@@ -353,10 +375,10 @@ class StreamingDelegate {
         this.log.debug('Stopped video stream.', this.camera.getDisplayName());
     }
     closeRecordingStream(streamId, reason) {
-        var _a, _b;
+        var _a;
         if ((_a = this.recordingSessionInfo) === null || _a === void 0 ? void 0 : _a.hksvStreamer) {
-            (_b = this.recordingSessionInfo) === null || _b === void 0 ? void 0 : _b.hksvStreamer.destroy();
-            this.recordingSessionInfo.nestStreamer.teardown();
+            this.recordingSessionInfo.hksvStreamer.destroy();
+            this.recordingSessionInfo.nestStreamer.teardown().catch(err => this.log.error('Error tearing down recording stream: ' + (0, util_1.summarizeError)(err), this.camera.getDisplayName()));
             this.recordingSessionInfo = undefined;
         }
         this.handlingRecordingStreamingRequest = false;

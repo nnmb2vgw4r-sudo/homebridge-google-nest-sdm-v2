@@ -61,17 +61,22 @@ export class SmartDeviceManagement {
 
                 this.log.debug('Event received: ' + message.data.toString());
 
-                const event: Events.Event = JSON.parse(message.data);
+                let event: Events.Event;
+                try {
+                    event = JSON.parse(message.data.toString());
+                } catch (error: any) {
+                    this.log.warn('Discarding malformed Pub/Sub event: ' + summarizeError(error));
+                    return;
+                }
 
-                // if ((event as Events.ResourceRelationEvent).relationUpdate) {
-                //     const resourceRelationtEvent = event as Events.ResourceRelationEvent;
-                // } else
-                if ((event as Events.ResourceEventEvent).resourceUpdate.events) {
+                // Not every event carries resourceUpdate (e.g. resource-relation events) — guard it.
+                const resourceUpdate = (event as Partial<Events.ResourceEventEvent>).resourceUpdate;
+                if (resourceUpdate?.events) {
                     const resourceEventEvent = event as Events.ResourceEventEvent;
                     const device = _.find(this.devices, device => device.getName() === resourceEventEvent.resourceUpdate.name);
                     if (device)
                         device.event(resourceEventEvent);
-                } else if ((event as Events.ResourceTraitEvent).resourceUpdate.traits) {
+                } else if ((resourceUpdate as Events.ResourceTraitEvent['resourceUpdate'] | undefined)?.traits) {
                     const resourceTraitEvent = event as Events.ResourceTraitEvent;
                     const device = _.find(this.devices, device => device.getName() === resourceTraitEvent.resourceUpdate.name);
                     if (device)
@@ -79,8 +84,10 @@ export class SmartDeviceManagement {
                 }
             });
             this.subscription.on('error', error => {
-                this.log.error("Plugin initialization failed, there was a failure with event subscription. Make sure your refresh token was generated with the Pub/Sub scope - see https://github.com/nnmb2vgw4r-sudo/homebridge-google-nest-sdm-v2#-the-pubsub-scope-step--dont-skip-this -- " + summarizeError(error));
-                this.subscribed = false;
+                // A transient subscription error should NOT permanently stop the plugin: events are
+                // redelivered by the auto-reconnecting Pub/Sub client, and device discovery uses the
+                // REST API independently. Only a hard setup failure (constructor catch) disables.
+                this.log.error("Event subscription error. If this persists, ensure your refresh token was generated with the Pub/Sub scope - see https://github.com/nnmb2vgw4r-sudo/homebridge-google-nest-sdm-v2#-the-pubsub-scope-step--dont-skip-this -- " + summarizeError(error));
             });
         } catch (error: any) {
             this.log.error("Plugin initialization failed, there was a failure with event subscription. Make sure your refresh token was generated with the Pub/Sub scope - see https://github.com/nnmb2vgw4r-sudo/homebridge-google-nest-sdm-v2#-the-pubsub-scope-step--dont-skip-this -- " + summarizeError(error));

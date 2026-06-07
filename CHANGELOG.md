@@ -4,6 +4,42 @@ All notable changes to this fork are documented here. This project is a maintain
 fork of [`homebridge-google-nest-sdm`](https://github.com/potmat/homebridge-google-nest-sdm)
 by potmat; it follows the same ISC license.
 
+## 2.0.1
+
+Hardening release following a full code review. No config or behavior changes for a
+correctly configured setup; all items are robustness/correctness fixes.
+
+### Fixed / Hardened
+- **Pub/Sub message handler:** malformed event payloads are now caught and discarded
+  with a warning instead of throwing inside the `message` listener; events without a
+  `resourceUpdate` (e.g. resource-relation events) are tolerated.
+- **Subscription errors are no longer fatal:** a transient Pub/Sub `error` no longer
+  permanently disables the plugin — only a hard setup failure does. Events are
+  redelivered by the auto-reconnecting client.
+- **Startup config validation** reports exactly which required field(s) are missing,
+  and still never logs the config object (which carries the client secret / refresh
+  token).
+- **Stale accessories** (a device removed from the account, or the Fan disabled) are now
+  unregistered on successful discovery, instead of lingering as "not responding" tiles.
+- **WebRTC keep-alive timer leak:** the RTCP-PLI interval is now cleared on every
+  teardown and on the 429 abort path, so streams/snapshots/recordings no longer leak a
+  timer per session.
+- **AccessoryInformation** (Manufacturer/Model/Serial) is now set on the real service
+  instead of a discarded throwaway one.
+- **Thermostat setpoints:** `setTargetTemperatureRange` no longer falls through between
+  HEAT/COOL cases; `setFan` only sends a duration when one is provided.
+- **Stream/snapshot error paths:** snapshot, prepare-stream and start-stream failures are
+  caught, summarized (no token leakage), and reported back via their callbacks instead of
+  surfacing as unhandled rejections; failed stream starts tear down cleanly.
+- **`setupEvents` is serialized** so concurrent invocations (constructor + mode/eco
+  update handlers) can't interleave and leave threshold characteristics inconsistent.
+- **EcoMode** custom characteristic is declared optional on the service to avoid
+  Homebridge 2.x warnings.
+
+### Changed
+- Dev dependency `homebridge` bumped to `^1.6.0 || ^2.0.0` to compile against the v2 types
+  it declares support for.
+
 ## 2.0.0
 
 First release of the `homebridge-google-nest-sdm-v2` fork, based on upstream `1.1.23`.

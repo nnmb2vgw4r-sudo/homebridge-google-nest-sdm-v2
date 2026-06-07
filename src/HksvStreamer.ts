@@ -119,7 +119,11 @@ export default class HksvStreamer {
         this.childProcess = undefined;
         if (cp) {
             try { cp.kill('SIGTERM'); } catch (e) { /* ignore */ }
-            setTimeout(() => { try { cp.kill('SIGKILL'); } catch (e) { /* ignore */ } }, 2000).unref();
+            setTimeout(() => {
+                // Only escalate if it actually survived SIGTERM; killing a reaped PID is a no-op in
+                // Node but the guard avoids the needless syscall and keeps the intent clear.
+                if (!cp.killed) { try { cp.kill('SIGKILL'); } catch (e) { /* ignore */ } }
+            }, 2000).unref();
         }
 
         try { this.server?.close(); } catch (e) { /* ignore */ }

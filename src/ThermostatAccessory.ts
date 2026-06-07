@@ -36,11 +36,11 @@ export class ThermostatAccessory extends Accessory<Thermostat> {
             this.service = accessory.addService(this.api.hap.Service.Thermostat);
         }
 
-        let ecoMode = this.service.getCharacteristic(this.platform.Characteristic.EcoMode);
-        if (!ecoMode)
-            ecoMode = this.service.addCharacteristic(this.platform.Characteristic.EcoMode);
-
-        ecoMode
+        // EcoMode is a custom characteristic. Declare it as optional on the service first so
+        // Homebridge 2.x doesn't warn about adding a characteristic outside the service's
+        // required/optional set; getCharacteristic then returns (or creates) it cleanly.
+        this.service.addOptionalCharacteristic(this.platform.Characteristic.EcoMode);
+        this.service.getCharacteristic(this.platform.Characteristic.EcoMode)
             .onGet(this.handleEcoModeGet.bind(this))
             .onSet(this.handleEcoModeSet.bind(this));
 
@@ -72,7 +72,20 @@ export class ThermostatAccessory extends Accessory<Thermostat> {
         this.device.onEcoChanged = this.handleEcoUpdate.bind(this);
     }
 
-    private async setupEvents() {
+    // Serialize setupEvents(): it is invoked from the constructor and (un-awaited) from both the
+    // mode-change and eco-change update handlers. Concurrent runs interleaved their
+    // removeOnGet/onGet/setProps calls and left the threshold characteristics in an inconsistent
+    // state. Chaining guarantees one run finishes mutating the service before the next begins.
+    private setupEventsQueue: Promise<void> = Promise.resolve();
+
+    private setupEvents(): Promise<void> {
+        this.setupEventsQueue = this.setupEventsQueue
+            .catch(() => undefined)
+            .then(() => this.setupEventsImpl());
+        return this.setupEventsQueue;
+    }
+
+    private async setupEventsImpl() {
         this.service.getCharacteristic(this.platform.Characteristic.CoolingThresholdTemperature).removeOnGet();
         this.service.getCharacteristic(this.platform.Characteristic.CoolingThresholdTemperature).removeOnSet();
         this.service.getCharacteristic(this.platform.Characteristic.HeatingThresholdTemperature).removeOnGet();

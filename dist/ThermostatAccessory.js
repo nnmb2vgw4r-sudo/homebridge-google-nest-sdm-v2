@@ -30,6 +30,11 @@ const Accessory_1 = require("./Accessory");
 class ThermostatAccessory extends Accessory_1.Accessory {
     constructor(api, log, platform, accessory, device) {
         super(api, log, platform, accessory, device);
+        // Serialize setupEvents(): it is invoked from the constructor and (un-awaited) from both the
+        // mode-change and eco-change update handlers. Concurrent runs interleaved their
+        // removeOnGet/onGet/setProps calls and left the threshold characteristics in an inconsistent
+        // state. Chaining guarantees one run finishes mutating the service before the next begins.
+        this.setupEventsQueue = Promise.resolve();
         this.accessory.on("identify" /* IDENTIFY */, () => {
             log.info("%s identified!", accessory.displayName);
         });
@@ -38,10 +43,11 @@ class ThermostatAccessory extends Accessory_1.Accessory {
         if (!this.service) {
             this.service = accessory.addService(this.api.hap.Service.Thermostat);
         }
-        let ecoMode = this.service.getCharacteristic(this.platform.Characteristic.EcoMode);
-        if (!ecoMode)
-            ecoMode = this.service.addCharacteristic(this.platform.Characteristic.EcoMode);
-        ecoMode
+        // EcoMode is a custom characteristic. Declare it as optional on the service first so
+        // Homebridge 2.x doesn't warn about adding a characteristic outside the service's
+        // required/optional set; getCharacteristic then returns (or creates) it cleanly.
+        this.service.addOptionalCharacteristic(this.platform.Characteristic.EcoMode);
+        this.service.getCharacteristic(this.platform.Characteristic.EcoMode)
             .onGet(this.handleEcoModeGet.bind(this))
             .onSet(this.handleEcoModeSet.bind(this));
         this.service.getCharacteristic(this.platform.Characteristic.CurrentHeatingCoolingState)
@@ -65,7 +71,13 @@ class ThermostatAccessory extends Accessory_1.Accessory {
         this.device.onModeChanged = this.handleTargetHeatingCoolingStateUpdate.bind(this);
         this.device.onEcoChanged = this.handleEcoUpdate.bind(this);
     }
-    async setupEvents() {
+    setupEvents() {
+        this.setupEventsQueue = this.setupEventsQueue
+            .catch(() => undefined)
+            .then(() => this.setupEventsImpl());
+        return this.setupEventsQueue;
+    }
+    async setupEventsImpl() {
         var _a;
         this.service.getCharacteristic(this.platform.Characteristic.CoolingThresholdTemperature).removeOnGet();
         this.service.getCharacteristic(this.platform.Characteristic.CoolingThresholdTemperature).removeOnSet();

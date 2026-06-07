@@ -5,6 +5,7 @@ import {RTCPeerConnection, RTCRtpCodecParameters} from "werift";
 import * as Traits from "./sdm/Traits";
 import {Logger} from "homebridge";
 import pickPort, { pickPortOptions } from 'pick-port';
+import {summarizeError} from "./util";
 
 export interface NestStream {
     args: string,
@@ -22,7 +23,7 @@ export abstract class NestStreamer {
     }
 
     abstract initialize(): Promise<NestStream>;
-    abstract teardown(): void;
+    abstract teardown(): Promise<void>;
 }
 
 export class RtspNestStreamer extends NestStreamer {
@@ -35,13 +36,19 @@ export class RtspNestStreamer extends NestStreamer {
     }
 
     async teardown(): Promise<void> {
-        await this.camera.stopStream(this.token!);
+        if (!this.token) return;
+        try {
+            await this.camera.stopStream(this.token);
+        } catch (error: any) {
+            this.log.error('Error stopping camera stream: ' + summarizeError(error));
+        }
     }
 }
 
 export class WebRtcNestStreamer extends NestStreamer {
     private udp: Socket | undefined;
     private pc: RTCPeerConnection | undefined;
+    private pliTimer: NodeJS.Timeout | undefined;
 
     async initialize(): Promise<NestStream> {
 
@@ -96,7 +103,10 @@ export class WebRtcNestStreamer extends NestStreamer {
                 this.udp!.send(rtp.serialize(), videoPort, "127.0.0.1");
             });
             track.onReceiveRtp.once(() => {
-                setInterval(() => videoTransceiver.receiver.sendRtcpPLI(track.ssrc!), 2000);
+                // Keep-alive keyframe requests. MUST be cleared in teardown() — otherwise every
+                // stream/snapshot/recording leaks a timer firing on a closed receiver forever.
+                this.pliTimer = setInterval(() => videoTransceiver.receiver.sendRtcpPLI(track.ssrc!), 2000);
+                this.pliTimer.unref?.();
             });
         });
 
@@ -110,8 +120,9 @@ export class WebRtcNestStreamer extends NestStreamer {
             // generateStream() returns undefined when the SDM command failed — most
             // commonly an HTTP 429 (RESOURCE_EXHAUSTED). Fail with a clear message
             // instead of throwing a TypeError on `streamInfo.mediaSessionId`.
-            try { await this.pc?.close(); } catch (e) { /* ignore */ }
-            try { await this.udp?.close(); } catch (e) { /* ignore */ }
+            if (this.pliTimer) { clearInterval(this.pliTimer); this.pliTimer = undefined; }
+            try { this.pc?.close(); } catch (e) { /* ignore */ }
+            try { this.udp?.close(); } catch (e) { /* ignore */ }
             throw new Error('Nest SDM returned no media session (likely rate-limited / HTTP 429). Aborting stream start.');
         }
         this.token = streamInfo.mediaSessionId;
@@ -144,22 +155,29 @@ a=sendrecv`
     }
 
     async teardown(): Promise<void> {
-        try {
-            await this.camera.stopStream(this.token!);
-        } catch (error: any) {
-            this.log.error('Error stopping camera stream.', error);
+        if (this.pliTimer) {
+            clearInterval(this.pliTimer);
+            this.pliTimer = undefined;
+        }
+
+        if (this.token) {
+            try {
+                await this.camera.stopStream(this.token);
+            } catch (error: any) {
+                this.log.error('Error stopping camera stream: ' + summarizeError(error));
+            }
         }
 
         try {
-            await this.pc?.close();
+            this.pc?.close();
         } catch (error: any) {
-            this.log.error('Error closing peer connection.', error);
+            this.log.error('Error closing peer connection: ' + summarizeError(error));
         }
 
         try {
-            await this.udp?.close();
+            this.udp?.close();
         } catch (error: any) {
-            this.log.error('Error closing UDP connection to FFMpeg.', error);
+            this.log.error('Error closing UDP connection to FFMpeg: ' + summarizeError(error));
         }
     }
 }

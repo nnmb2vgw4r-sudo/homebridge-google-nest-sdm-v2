@@ -48,8 +48,11 @@ class Platform {
         this.EcoMode = EcoMode(api);
         IEcoMode = this.EcoMode;
         this.config = platformConfig;
-        if (!this.config || !this.config.projectId || !this.config.clientId || !this.config.clientSecret || !this.config.refreshToken || !this.config.subscriptionId) {
-            log.error(`${platformConfig.platform} is not configured correctly. The configuration provided was: ${JSON.stringify(this.config)}`);
+        const required = ['projectId', 'clientId', 'clientSecret', 'refreshToken', 'subscriptionId'];
+        const missing = required.filter(k => !this.config || !this.config[k]);
+        if (missing.length > 0) {
+            // NEVER log the config object — it carries clientSecret + the OAuth refresh token.
+            log.error(`${platformConfig.platform} is not configured correctly. Missing/empty required field(s): ${missing.join(', ')}`);
             return;
         }
         this.smartDeviceManagement = new Api_1.SmartDeviceManagement(this.config, log);
@@ -176,6 +179,21 @@ class Platform {
                         this.api.registerPlatformAccessories(Settings_1.PLUGIN_NAME, Settings_1.PLATFORM_NAME, [fanPlatformAccessory]);
                         break;
                 }
+            }
+        }
+        // Remove cached accessories that no longer map to a discovered device — e.g. a device was
+        // removed from the account, or the Fan was disabled (showFan off). Only runs when discovery
+        // succeeded (guarded by the early return on a null device list), so a transient API failure
+        // won't wipe accessories.
+        const validUuids = new Set(deviceInfos.filter(d => d.category !== 1 /* OTHER */).map(d => d.uuid));
+        const stale = this.accessories.filter(a => !validUuids.has(a.UUID));
+        if (stale.length > 0) {
+            this.log.info(`Removing ${stale.length} stale accessory(ies): ${stale.map(a => a.displayName).join(', ')}`);
+            this.api.unregisterPlatformAccessories(Settings_1.PLUGIN_NAME, Settings_1.PLATFORM_NAME, stale);
+            for (const s of stale) {
+                const idx = this.accessories.indexOf(s);
+                if (idx >= 0)
+                    this.accessories.splice(idx, 1);
             }
         }
     }

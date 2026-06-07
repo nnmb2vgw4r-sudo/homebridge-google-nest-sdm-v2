@@ -30,7 +30,7 @@ import {Platform} from "./Platform";
 import HksvStreamer from "./HksvStreamer";
 import pickPort, { pickPortOptions } from 'pick-port';
 import * as SnapshotRefresher from "./SnapshotRefresher";
-import {resolveFfmpegPath} from "./util";
+import {resolveFfmpegPath, summarizeError} from "./util";
 
 type SessionInfo = {
   address: string; // address of the HAP controller
@@ -171,8 +171,13 @@ export abstract class StreamingDelegate<T extends CameraController> implements C
   handleSnapshotRequest(request: SnapshotRequest, callback: SnapshotRequestCallback): void {
     this.camera.getSnapshot()
         .then(result => {
-          callback(undefined, result);
+          if (result) callback(undefined, result);
+          else callback(new Error('No snapshot available'));
         })
+        .catch(error => {
+          this.log.error('Snapshot request failed: ' + summarizeError(error), this.camera.getDisplayName());
+          callback(error instanceof Error ? error : new Error(String(error)));
+        });
   }
 
   private static determineResolution(request: VideoInfo): ResolutionInfo {
@@ -221,7 +226,7 @@ export abstract class StreamingDelegate<T extends CameraController> implements C
   }
 
   async prepareStream(request: PrepareStreamRequest, callback: PrepareStreamCallback): Promise<void> {
-
+   try {
     const camaraInfo = await this.camera.getCameraLiveStream();
 
     if (!camaraInfo) {
@@ -282,6 +287,9 @@ export abstract class StreamingDelegate<T extends CameraController> implements C
 
     this.pendingSessions[request.sessionID] = sessionInfo;
     callback(undefined, response);
+   } catch (error: any) {
+    this.logThenCallback(callback, 'Failed to prepare stream: ' + summarizeError(error));
+   }
   }
 
   private async startStream(request: StartStreamRequest, callback: StreamRequestCallback): Promise<void> {
@@ -302,7 +310,8 @@ export abstract class StreamingDelegate<T extends CameraController> implements C
       nestStream = await nestStreamer.initialize(); // '-analyzeduration 15000000 -probesize 100000000 -i ' + streamInfo.streamUrls.rtspUrl;
       ffmpegArgs = nestStream.args;
     } catch (error: any) {
-      this.logThenCallback(callback, error);
+      await nestStreamer.teardown();
+      this.logThenCallback(callback, summarizeError(error));
       return;
     }
 
@@ -384,7 +393,8 @@ export abstract class StreamingDelegate<T extends CameraController> implements C
       });
       activeSession.socket.bind(sessionInfo.videoReturnPort, sessionInfo.localAddress);
     } catch (error: any) {
-      this.logThenCallback(callback, error);
+      await nestStreamer.teardown();
+      this.logThenCallback(callback, summarizeError(error));
       return;
     }
 
@@ -397,7 +407,14 @@ export abstract class StreamingDelegate<T extends CameraController> implements C
   async handleStreamRequest(request: StreamingRequest, callback: StreamRequestCallback): Promise<void> {
     switch (request.type) {
       case StreamRequestTypes.START:
-        this.startStream(request, callback);
+        try {
+          await this.startStream(request, callback);
+        } catch (error: any) {
+          // startStream is otherwise fire-and-forget; without this a reject (e.g. a 429 from the
+          // SDM call before the inner try) would be an unhandled rejection that can crash the bridge.
+          this.log.error('Failed to start stream: ' + summarizeError(error), this.camera.getDisplayName());
+          callback(error instanceof Error ? error : new Error(String(error)));
+        }
         break;
       case StreamRequestTypes.RECONFIGURE:
         this.log.debug(`Received request to reconfigure: ${request.video.width} x ${request.video.height}, ${request.video.fps} fps, ${request.video.max_bit_rate} kbps (Ignored)`, this.camera.getDisplayName());
@@ -444,8 +461,9 @@ export abstract class StreamingDelegate<T extends CameraController> implements C
 
   closeRecordingStream(streamId: number, reason: HDSProtocolSpecificErrorReason | undefined): void {
     if (this.recordingSessionInfo?.hksvStreamer) {
-      this.recordingSessionInfo?.hksvStreamer.destroy();
-      this.recordingSessionInfo.nestStreamer.teardown();
+      this.recordingSessionInfo.hksvStreamer.destroy();
+      this.recordingSessionInfo.nestStreamer.teardown().catch(err =>
+        this.log.error('Error tearing down recording stream: ' + summarizeError(err), this.camera.getDisplayName()));
       this.recordingSessionInfo = undefined;
     }
     this.handlingRecordingStreamingRequest = false;

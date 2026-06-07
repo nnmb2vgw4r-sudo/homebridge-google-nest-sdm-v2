@@ -61,6 +61,7 @@ export class Thermostat extends Device {
                         const traitValue = value as Traits.Fan;
                         this.onFanChanged(traitValue);
                     }
+                    break;
                 case Traits.Constants.ThermostatHvac:
                     if (this.onHvacChanged) {
                         const traitValue = value as Traits.ThermostatHvac;
@@ -192,15 +193,17 @@ export class Thermostat extends Device {
             case Traits.ThermostatModeType.HEAT:
                 if (!heat)
                     throw new Error('Cannot set a target temperature range (heat only) when the thermostat is not in heat mode.');
-                await this.executeCommand<Commands.ThermostatTemperatureSetpoint_SetHeat, void>(Commands.Constants.ThermostatTemperatureSetpoint_SetRange, {
+                await this.executeCommand<Commands.ThermostatTemperatureSetpoint_SetHeat, void>(Commands.Constants.ThermostatTemperatureSetpoint_SetHeat, {
                     heatCelsius: heat
                 });
+                break;
             case Traits.ThermostatModeType.COOL:
                 if (!cool)
                     throw new Error('Cannot set a target temperature range (cool only) when the thermostat is not in cool mode.');
-                await this.executeCommand<Commands.ThermostatTemperatureSetpoint_SetCool, void>(Commands.Constants.ThermostatTemperatureSetpoint_SetRange, {
+                await this.executeCommand<Commands.ThermostatTemperatureSetpoint_SetCool, void>(Commands.Constants.ThermostatTemperatureSetpoint_SetCool, {
                     coolCelsius: cool
                 });
+                break;
             case Traits.ThermostatModeType.OFF:
                 throw new Error('Cannot set a target temperature when the thermostat is off.');
         }
@@ -262,9 +265,10 @@ export class Thermostat extends Device {
     }
 
     async setFan(timerMode: FanTimerModeType, duration?: number) {
-        await this.executeCommand<Commands.ThermostatFan_SetTimer, void>(Commands.Constants.ThermostatFan_SetTimer, {
-            timerMode: timerMode,
-            duration: duration + 's'
-        })
+        const params = { timerMode: timerMode } as Commands.ThermostatFan_SetTimer;
+        // Only include a duration when one is actually provided — otherwise we'd send "undefineds".
+        if (duration !== undefined && !isNaN(duration))
+            (params as { duration?: string }).duration = duration + 's';
+        await this.executeCommand<Commands.ThermostatFan_SetTimer, void>(Commands.Constants.ThermostatFan_SetTimer, params);
     }
 }

@@ -61,21 +61,28 @@ class SmartDeviceManagement {
             });
             this.subscription = this.pubSubClient.subscription(config.subscriptionId);
             this.subscription.on('message', message => {
+                var _a;
                 message.ack();
                 if (!this.devices)
                     return;
                 this.log.debug('Event received: ' + message.data.toString());
-                const event = JSON.parse(message.data);
-                // if ((event as Events.ResourceRelationEvent).relationUpdate) {
-                //     const resourceRelationtEvent = event as Events.ResourceRelationEvent;
-                // } else
-                if (event.resourceUpdate.events) {
+                let event;
+                try {
+                    event = JSON.parse(message.data.toString());
+                }
+                catch (error) {
+                    this.log.warn('Discarding malformed Pub/Sub event: ' + (0, util_1.summarizeError)(error));
+                    return;
+                }
+                // Not every event carries resourceUpdate (e.g. resource-relation events) — guard it.
+                const resourceUpdate = event.resourceUpdate;
+                if (resourceUpdate === null || resourceUpdate === void 0 ? void 0 : resourceUpdate.events) {
                     const resourceEventEvent = event;
                     const device = lodash_1.default.find(this.devices, device => device.getName() === resourceEventEvent.resourceUpdate.name);
                     if (device)
                         device.event(resourceEventEvent);
                 }
-                else if (event.resourceUpdate.traits) {
+                else if ((_a = resourceUpdate) === null || _a === void 0 ? void 0 : _a.traits) {
                     const resourceTraitEvent = event;
                     const device = lodash_1.default.find(this.devices, device => device.getName() === resourceTraitEvent.resourceUpdate.name);
                     if (device)
@@ -83,8 +90,10 @@ class SmartDeviceManagement {
                 }
             });
             this.subscription.on('error', error => {
-                this.log.error("Plugin initialization failed, there was a failure with event subscription. Make sure your refresh token was generated with the Pub/Sub scope - see https://github.com/nnmb2vgw4r-sudo/homebridge-google-nest-sdm-v2#-the-pubsub-scope-step--dont-skip-this -- " + (0, util_1.summarizeError)(error));
-                this.subscribed = false;
+                // A transient subscription error should NOT permanently stop the plugin: events are
+                // redelivered by the auto-reconnecting Pub/Sub client, and device discovery uses the
+                // REST API independently. Only a hard setup failure (constructor catch) disables.
+                this.log.error("Event subscription error. If this persists, ensure your refresh token was generated with the Pub/Sub scope - see https://github.com/nnmb2vgw4r-sudo/homebridge-google-nest-sdm-v2#-the-pubsub-scope-step--dont-skip-this -- " + (0, util_1.summarizeError)(error));
             });
         }
         catch (error) {
