@@ -29,12 +29,14 @@ node .claude/skills/run-homebridge-google-nest-sdm-v2/driver.mjs   # offline smo
 
 ## Deploy target
 
-Runs on **Zork-O-Plex** (Windows Plex box, `192.168.4.21`), Node 24, Homebridge as an
-NSSM service. NOT on the Pi (the Pi runs the other plugins). Deploy = publish to npm,
-then on the host `npm.cmd i -g homebridge-google-nest-sdm-v2@<ver>` + `Restart-Service
-Homebridge`. See the `/release-homebridge-plugin` workspace skill for the full pipeline.
-Gotchas: `npm` over SSH→PowerShell is blocked (use `npm.cmd`); fresh npm versions take
-~30–60s to propagate (else `notarget` — retry).
+Runs on the **Mac mini Roon Core** (`192.168.4.50`), which hosts the Nest-cameras-only
+Homebridge instance (h264_videotoolbox hardware encoding). This plugin was migrated here
+from the old Zork-O-Plex Windows Plex box — that box is now a gaming PC only and no longer
+runs Nest/Homebridge. NOT on the Pi (the Pi runs the other plugins). Deploy = publish to
+npm, then on the mini `npm i -g homebridge-google-nest-sdm-v2@<ver>` and restart the
+Homebridge service (managed via the homebridge-ui MCP, host `mini`). See the
+`/release-homebridge-plugin` workspace skill for the full pipeline. Gotcha: fresh npm
+versions take ~30–60s to propagate (else `notarget` — retry).
 
 ## Bug classes that have actually bitten this codebase
 

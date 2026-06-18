@@ -4,6 +4,23 @@ All notable changes to this fork are documented here. This project is a maintain
 fork of [`homebridge-google-nest-sdm`](https://github.com/potmat/homebridge-google-nest-sdm)
 by potmat; it follows the same ISC license.
 
+## 2.0.4
+
+### Security
+- **Bumped `axios` `^1.3.5` → `^1.16.0` (resolves to 1.18.0).** Clears several Dependabot
+  high-severity advisories: prototype-pollution gadgets (MitM via `config.proxy`, credential
+  theft / response hijacking in config merge), `Proxy-Authorization` leak across HTTP→HTTPS
+  redirect, and ReDoS via cookie-name injection. Only call site is the event-image `axios.get`
+  in `src/sdm/Camera.ts`; the GET API and `AxiosError` shape are unchanged across 1.x, so no
+  behavior change.
+- **Bumped `systeminformation` `^5.9.3` → `^5.31.6` (resolves to 5.31.7).** Clears the
+  high-severity Linux command-injection advisory in `networkInterfaces()`. This plugin only
+  calls `networkInterfaceDefault()`, whose contract is unchanged.
+
+Dependency-only release — no source changes. (Transitive advisories from the older
+`@google-cloud/pubsub` / `googleapis` chains are tracked separately and require major
+upgrades.)
+
 ## 2.0.3
 
 ### Fixed
