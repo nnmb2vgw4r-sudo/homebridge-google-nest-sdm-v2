@@ -1,6 +1,7 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.resolveFfmpegPath = exports.summarizeError = void 0;
+exports.summarizeError = summarizeError;
+exports.resolveFfmpegPath = resolveFfmpegPath;
 /**
  * Build a concise, SAFE error summary for logging. Crucially this never includes
  * the request config / headers (which carry the OAuth `Authorization` bearer token
@@ -14,7 +15,6 @@ function summarizeError(error) {
     const message = apiMessage || (error === null || error === void 0 ? void 0 : error.message) || String(error);
     return status ? `HTTP ${status}${statusText ? ' ' + statusText : ''}: ${message}` : message;
 }
-exports.summarizeError = summarizeError;
 /**
  * Resolve which ffmpeg binary to use: an explicit configured path wins, otherwise
  * the bundled `ffmpeg-for-homebridge`, otherwise `ffmpeg` from PATH.
@@ -25,5 +25,4 @@ function resolveFfmpegPath(configuredPath) {
     // eslint-disable-next-line @typescript-eslint/no-var-requires
     return require('ffmpeg-for-homebridge') || 'ffmpeg';
 }
-exports.resolveFfmpegPath = resolveFfmpegPath;
 //# sourceMappingURL=util.js.map

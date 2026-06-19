@@ -52,6 +52,10 @@ class Device {
         //this.log.debug(`Request for trait ${name} had value ${JSON.stringify(value)}`, this.getDisplayName());
         return value;
     }
+    // T is constrained to an object (or null) so it satisfies the SDM executeCommand
+    // requestBody.params type ({ [key: string]: any } | null | undefined). Without the
+    // constraint, TypeScript 5.6's stricter overload resolution can't prove an unconstrained
+    // T matches, discards the typed overload, and `response.data` resolves to never.
     async executeCommand(name, params) {
         var _a;
         this.log.debug(`Executing command ${name} with parameters ${JSON.stringify(params)}`, this.getDisplayName());

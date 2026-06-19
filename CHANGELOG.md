@@ -4,6 +4,33 @@ All notable changes to this fork are documented here. This project is a maintain
 fork of [`homebridge-google-nest-sdm`](https://github.com/potmat/homebridge-google-nest-sdm)
 by potmat; it follows the same ISC license.
 
+## 2.0.5
+
+### Security
+- **Bumped `@google-cloud/pubsub` `^2.18.1` → `^4.11.0` (resolves 4.11.0).** Clears 13
+  transitive Dependabot advisories that all came in through the old pubsub →
+  `google-gax@2` → `@grpc/grpc-js@1.6` + `protobufjs` chain: 10 `protobufjs` (code
+  injection / prototype-pollution / unbounded-recursion DoS), 2 `@grpc/grpc-js`
+  (malformed-message crash), and 1 `@protobufjs/utf8`. v4 pulls patched
+  `@grpc/grpc-js` 1.14.4 and `protobufjs` 7.6.4. (Chose v4 over v5 for a smaller
+  dependency delta; v3 was insufficient — it caps grpc-js below the patched version.)
+  The Pub/Sub event path in `src/sdm/Api.ts` (subscription + message ack/parse) is
+  unchanged across the major — the `PubSub` constructor credentials option,
+  `subscription()`, and `message` events behave identically.
+
+### Changed
+- **Dev toolchain: `typescript` `^4.4.3` → `~5.6`.** Required because pubsub v4's gax
+  pulls `@opentelemetry/api` type definitions the old TypeScript parser can't read.
+  Pinned to the `5.6` minor deliberately (TS ≥5.7 changes typed-array generics, which
+  is unrelated churn). No runtime effect — `dist` is recompiled output only.
+- **`src/sdm/Device.ts`: constrained the `executeCommand<T, …>` generic to
+  `T extends Record<string, any> | null`.** Type-only fix so TypeScript 5.6 selects the
+  correct SDM `executeCommand` overload (an unconstrained `T` no longer matched the
+  request-body `params` shape). The command payload sent to Google is byte-identical.
+
+Transitive advisories from the `googleapis` (uuid) and `ffmpeg-for-homebridge` (tar)
+chains are tracked separately and require their own major upgrades.
+
 ## 2.0.4
 
 ### Security

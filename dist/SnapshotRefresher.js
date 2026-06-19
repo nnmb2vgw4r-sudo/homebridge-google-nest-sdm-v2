@@ -3,7 +3,10 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.requestRefresh = exports.snapshotPathFor = exports.isConfigured = exports.configure = void 0;
+exports.configure = configure;
+exports.isConfigured = isConfigured;
+exports.snapshotPathFor = snapshotPathFor;
+exports.requestRefresh = requestRefresh;
 const fs_1 = __importDefault(require("fs"));
 const path_1 = __importDefault(require("path"));
 const crypto_1 = __importDefault(require("crypto"));
@@ -30,11 +33,9 @@ function configure(c) {
     catch (e) { /* ignore */ }
     c.log.info(`Snapshot refresher ${c.enabled ? "enabled" : "disabled"} (spacing ${Math.round(c.spacingMs / 1000)}s, ttl ${Math.round(c.ttlMs / 60000)}m). Cache: ${cacheDir}`);
 }
-exports.configure = configure;
 function isConfigured() {
     return !!cfg && !!cacheDir;
 }
-exports.isConfigured = isConfigured;
 function sha1(s) {
     return crypto_1.default.createHash("sha1").update(s).digest("hex");
 }
@@ -43,7 +44,6 @@ function snapshotPathFor(cameraName) {
         throw new Error("SnapshotRefresher is not configured");
     return path_1.default.join(cacheDir, sha1(cameraName) + ".jpg");
 }
-exports.snapshotPathFor = snapshotPathFor;
 function tmpPathFor(cameraName) {
     return path_1.default.join(cacheDir, "." + sha1(cameraName) + ".tmp.jpg");
 }
@@ -101,7 +101,6 @@ function requestRefresh(camera, reason) {
     }
     catch (e) { /* never throw into hook */ }
 }
-exports.requestRefresh = requestRefresh;
 async function runWorker() {
     var _a;
     try {

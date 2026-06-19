@@ -1,7 +1,11 @@
 "use strict";
 var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
     if (k2 === undefined) k2 = k;
-    Object.defineProperty(o, k2, { enumerable: true, get: function() { return m[k]; } });
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
 }) : (function(o, m, k, k2) {
     if (k2 === undefined) k2 = k;
     o[k2] = m[k];
@@ -61,7 +65,6 @@ class SmartDeviceManagement {
             });
             this.subscription = this.pubSubClient.subscription(config.subscriptionId);
             this.subscription.on('message', message => {
-                var _a;
                 message.ack();
                 if (!this.devices)
                     return;
@@ -82,7 +85,7 @@ class SmartDeviceManagement {
                     if (device)
                         device.event(resourceEventEvent);
                 }
-                else if ((_a = resourceUpdate) === null || _a === void 0 ? void 0 : _a.traits) {
+                else if (resourceUpdate === null || resourceUpdate === void 0 ? void 0 : resourceUpdate.traits) {
                     const resourceTraitEvent = event;
                     const device = lodash_1.default.find(this.devices, device => device.getName() === resourceTraitEvent.resourceUpdate.name);
                     if (device)

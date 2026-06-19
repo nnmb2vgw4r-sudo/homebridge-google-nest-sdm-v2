@@ -62,7 +62,11 @@ export abstract class Device {
         return value;
     }
 
-    async executeCommand<T, U>(name: string, params?: T): Promise<U | undefined> {
+    // T is constrained to an object (or null) so it satisfies the SDM executeCommand
+    // requestBody.params type ({ [key: string]: any } | null | undefined). Without the
+    // constraint, TypeScript 5.6's stricter overload resolution can't prove an unconstrained
+    // T matches, discards the typed overload, and `response.data` resolves to never.
+    async executeCommand<T extends Record<string, any> | null, U>(name: string, params?: T): Promise<U | undefined> {
         this.log.debug(`Executing command ${name} with parameters ${JSON.stringify(params)}`, this.getDisplayName());
         try {
             const response = await this.smartdevicemanagement.enterprises.devices.executeCommand({
