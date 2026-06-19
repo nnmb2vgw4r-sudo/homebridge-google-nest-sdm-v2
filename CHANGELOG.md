@@ -4,6 +4,29 @@ All notable changes to this fork are documented here. This project is a maintain
 fork of [`homebridge-google-nest-sdm`](https://github.com/potmat/homebridge-google-nest-sdm)
 by potmat; it follows the same ISC license.
 
+## 2.0.6
+
+### Security
+- **Bumped `ffmpeg-for-homebridge` `2.1.1` → `2.2.2`.** Clears the remaining transitive
+  `tar` advisory (GHSA-vmf3-w455-68vh, `<= 7.5.15`) — the new version pulls patched
+  `tar@7.5.16`. `tar` is only used by ffmpeg-for-homebridge's install step to unpack the
+  bundled ffmpeg binary; the binary itself still provides the hardware encoders
+  (`h264_videotoolbox` etc.).
+
+### Changed
+- **Raised the minimum Node version to `>=22`** (`engines.node`, was `>=18`).
+  `ffmpeg-for-homebridge@2.2.2` itself requires Node ≥22, so the plugin's floor is raised
+  to match and avoid an `EBADENGINE` mismatch.
+- **The bundled ffmpeg binary moves from 6.x to 8.0** (carried by ffmpeg-for-homebridge
+  2.2.2). It still ships `h264_videotoolbox`/`hevc_videotoolbox`; users with a custom
+  `ffmpegPath` are unaffected.
+
+The one remaining Dependabot `uuid` advisory (GHSA-w5hq-g745-h8pq) is **not applicable**:
+it concerns `uuid` v3/v5/v6 when a `buf` argument is supplied, but every transitive
+consumer here (gaxios, google-gax, werift) uses `uuid.v4()` with no buffer. Forcing a
+`uuid@11` override across those packages' declared ranges would add risk without fixing a
+reachable issue, so the alert is dismissed as not-affected rather than overridden.
+
 ## 2.0.5
 
 ### Security
