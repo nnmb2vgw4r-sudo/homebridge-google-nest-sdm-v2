@@ -3,19 +3,26 @@ import * as Events from './Events';
 import {Logger} from "homebridge";
 import _ from "lodash";
 import {summarizeError} from "../util";
+import { Queue } from "./Queue";
 
 export abstract class Device {
     protected smartdevicemanagement: google.smartdevicemanagement_v1.Smartdevicemanagement;
     protected device: google.smartdevicemanagement_v1.Schema$GoogleHomeEnterpriseSdmV1Device;
     protected lastRefresh: number;
+    protected refreshPending: boolean;
     protected displayName: string|null|undefined;
     protected log: Logger;
+
+    private queue: Queue;
+
     constructor(smartdevicemanagement: google.smartdevicemanagement_v1.Smartdevicemanagement,
                 device: google.smartdevicemanagement_v1.Schema$GoogleHomeEnterpriseSdmV1Device,
                 log: Logger) {
         this.smartdevicemanagement = smartdevicemanagement;
         this.device = device;
+        this.queue = Queue.getInstance(log);
         this.lastRefresh = Date.now();
+        this.refreshPending = false;
         const parent = <google.smartdevicemanagement_v1.Schema$GoogleHomeEnterpriseSdmV1ParentRelation|undefined>_.find(device.parentRelations, relation => relation.displayName);
         this.displayName = parent?.displayName;
         this.log = log;
@@ -25,8 +32,9 @@ export abstract class Device {
         if ((event as any).resourceUpdate && (event as any).resourceUpdate.traits) {
             const traitEvent = event as Events.ResourceTraitEvent;
             _.forEach(traitEvent.resourceUpdate.traits, (value, key) => {
-                if (this.device.traits && this.device.traits[key])
+                if (this.device.traits && this.device.traits[key]) {
                     this.device.traits[key] = value;
+                }
             })
         }
     };
@@ -39,12 +47,20 @@ export abstract class Device {
 
     async refresh() {
         try {
-            const response = await this.smartdevicemanagement.enterprises.devices.get({name: this.getName()});
+            this.refreshPending = true;
+
+            const howLongAgo: number = Date.now() - this.lastRefresh;
+            this.log.info(`Last refresh for ${this.getDisplayName()} was ${howLongAgo/1000}s, refreshing.`)
+
+            const response = await this.queue.enqueue(() =>
+                { return this.smartdevicemanagement.enterprises.devices.get({name: this.getName()}); });
             this.log.debug(`Request for device info for ${this.getDisplayName()} had value ${JSON.stringify(response.data)}`);
             this.device = response.data;
             this.lastRefresh = Date.now();
         } catch (error: any) {
             this.log.error('Could not execute device GET request: ' + summarizeError(error), this.getDisplayName());
+        } finally {
+            this.refreshPending = false;
         }
     }
 
@@ -52,9 +68,8 @@ export abstract class Device {
         const howLongAgo: number = Date.now() - this.lastRefresh;
         //Events will update traits as necessary
         //no need to refresh more than once per day
-        if (howLongAgo > 1000 * 60 * 60 * 24) {
-            await this.refresh();
-            this.log.debug(`Last refresh for ${this.getDisplayName()} was ${howLongAgo/1000}s, refreshing.`)
+        if (howLongAgo > 1000 * 60 * 60 * 24 && !this.refreshPending) {
+            this.refresh();
         }
 
         const value = this.device?.traits ? this.device?.traits[name] : null;
@@ -67,15 +82,16 @@ export abstract class Device {
     // constraint, TypeScript 5.6's stricter overload resolution can't prove an unconstrained
     // T matches, discards the typed overload, and `response.data` resolves to never.
     async executeCommand<T extends Record<string, any> | null, U>(name: string, params?: T): Promise<U | undefined> {
-        this.log.debug(`Executing command ${name} with parameters ${JSON.stringify(params)}`, this.getDisplayName());
+        this.log.debug(`Queueing command ${name} with parameters ${JSON.stringify(params)}`, this.getDisplayName());
         try {
-            const response = await this.smartdevicemanagement.enterprises.devices.executeCommand({
-                name: this.device?.name || undefined,
-                requestBody: {
-                    command: name,
-                    params: params
-                }
-            });
+            const response = await this.queue.enqueue(() =>
+                { return this.smartdevicemanagement.enterprises.devices.executeCommand({
+                    name: this.device?.name || undefined,
+                    requestBody: {
+                        command: name,
+                        params: params
+                    }
+                })});
             this.log.debug(`Execution of command ${name} returned ${JSON.stringify(response.data.results)}`, this.getDisplayName());
             return <U>response.data.results;
         } catch (error: any) {
